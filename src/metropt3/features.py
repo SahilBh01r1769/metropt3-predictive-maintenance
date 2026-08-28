@@ -21,6 +21,17 @@ def _window_features(chunk: pd.DataFrame) -> dict[str, float]:
     return out
 
 
+def _observed_cadence_seconds(times: pd.DatetimeIndex) -> float | None:
+    if len(times) < 2:
+        return None
+    diffs = pd.Series(times).diff().dt.total_seconds()
+    positive = diffs[diffs > 0]
+    if positive.empty:
+        return None
+    cadence = float(positive.median())
+    return cadence if np.isfinite(cadence) and cadence > 0 else None
+
+
 def build_windows(
     df: pd.DataFrame,
     *,
@@ -30,16 +41,18 @@ def build_windows(
 ) -> pd.DataFrame:
     """Create time windows strictly within each segment.
 
-    ``searchsorted`` is used instead of scanning the entire segment for every
-    window so the implementation remains practical on the full MetroPT-3 file.
+    Coverage is based on each segment's observed median timestamp cadence rather
+    than assuming one row per second. ``searchsorted`` avoids scanning the full
+    segment for every window and keeps the implementation practical on MetroPT-3.
     """
     if "segment_id" not in df.columns:
         raise ValueError("segment_id is required; run validate_and_segment first")
     if window_seconds <= 0 or step_seconds <= 0:
         raise ValueError("window_seconds and step_seconds must be positive")
+    if not 0 < min_coverage <= 1:
+        raise ValueError("min_coverage must be in (0, 1]")
 
     rows: list[dict] = []
-    min_rows = max(1, int(window_seconds * min_coverage))
     window_delta = pd.Timedelta(seconds=window_seconds)
     step_delta = pd.Timedelta(seconds=step_seconds)
 
@@ -47,10 +60,18 @@ def build_windows(
         segment = segment.sort_values(TIMESTAMP_COL).reset_index(drop=True)
         if segment.empty:
             continue
+
         times = pd.DatetimeIndex(segment[TIMESTAMP_COL])
+        cadence_seconds = _observed_cadence_seconds(times)
+        if cadence_seconds is None or cadence_seconds > window_seconds:
+            continue
+
+        expected_rows = max(1, int(round(window_seconds / cadence_seconds)))
+        min_rows = max(1, int(np.floor(expected_rows * min_coverage)))
         start = times[0]
         last = times[-1]
-        while start + window_delta <= last + pd.Timedelta(seconds=1):
+
+        while start + window_delta <= last + pd.Timedelta(seconds=cadence_seconds):
             end = start + window_delta
             left = int(times.searchsorted(start, side="left"))
             right = int(times.searchsorted(end, side="left"))
@@ -61,8 +82,10 @@ def build_windows(
                     "window_start": start,
                     "window_end": end,
                     "rows": int(len(chunk)),
+                    "cadence_seconds": cadence_seconds,
                 }
                 row.update(_window_features(chunk))
                 rows.append(row)
             start += step_delta
+
     return pd.DataFrame(rows)
