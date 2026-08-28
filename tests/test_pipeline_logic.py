@@ -24,12 +24,37 @@ def frame(start="2020-04-17 10:00:00", seconds=7200):
 
 def test_gap_creates_new_segment_and_windows_do_not_cross_it():
     df = frame(seconds=4000)
-    df.loc[2000:, "timestamp"] += pd.Timedelta(seconds=20)
+    df.loc[2000:, "timestamp"] += pd.Timedelta(seconds=60)
     valid, report = validate_and_segment(df)
     assert report.segments == 2
     windows = build_windows(valid, window_seconds=1200, step_seconds=600)
     assert not windows.empty
     assert windows.groupby("segment_id").size().shape[0] == 2
+
+
+def test_sparse_cadence_still_builds_complete_windows():
+    seconds = 7200
+    cadence = 10
+    points = seconds // cadence
+    ts = pd.date_range("2020-04-17 10:00:00", periods=points, freq=f"{cadence}s")
+    comp = (np.arange(points) % 12 < 6).astype(int)
+    df = pd.DataFrame({
+        "timestamp": ts,
+        "TP2": 2.0 + comp * 7,
+        "TP3": 8.8,
+        "H1": 8.0,
+        "DV_pressure": 0.1,
+        "Reservoirs": 8.7,
+        "Oil_temperature": 65.0,
+        "Motor_current": 3.0 + comp * 5,
+        "COMP": comp,
+    })
+    valid, report = validate_and_segment(df)
+    assert report.segments == 1
+    windows = build_windows(valid, window_seconds=3600, step_seconds=1800)
+    assert not windows.empty
+    assert windows["cadence_seconds"].eq(10.0).all()
+    assert windows["rows"].min() >= 288
 
 
 def test_invalid_row_is_quarantined():
