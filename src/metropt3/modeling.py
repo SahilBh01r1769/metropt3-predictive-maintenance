@@ -12,7 +12,7 @@ from sklearn.metrics import average_precision_score, balanced_accuracy_score, f1
 
 
 NON_FEATURE_COLS = {
-    "segment_id", "window_start", "window_end", "rows",
+    "segment_id", "window_start", "window_end", "rows", "cadence_seconds",
     "failure_within_horizon", "in_failure", "hours_to_next_failure",
 }
 
