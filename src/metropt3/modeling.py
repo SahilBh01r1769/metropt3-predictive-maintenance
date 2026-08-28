@@ -35,10 +35,37 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if c not in NON_FEATURE_COLS and pd.api.types.is_numeric_dtype(df[c])]
 
 
-def chronological_split(df: pd.DataFrame, test_fraction: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
+def chronological_split(
+    df: pd.DataFrame,
+    test_fraction: float = 0.2,
+    event_context_days: float = 7.0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return a leakage-safe chronological split.
+
+    When target labels are present, prefer a final-event holdout: the test set
+    begins several days before the final positive pre-failure window. This
+    keeps the last failure episode unseen during training and, unlike a naive
+    tail split, usually preserves both classes in the test set. If that split
+    is not viable, fall back to the final ``test_fraction`` of time.
+    """
     ordered = df.sort_values("window_end").reset_index(drop=True)
     if len(ordered) < 5:
         raise ValueError("Need at least 5 windows for evaluation")
+
+    if "failure_within_horizon" in ordered.columns:
+        positives = ordered.loc[ordered["failure_within_horizon"].astype(int) == 1, "window_end"]
+        if not positives.empty:
+            test_start = pd.Timestamp(positives.max()) - pd.Timedelta(days=event_context_days)
+            train = ordered.loc[ordered["window_end"] < test_start].copy()
+            test = ordered.loc[ordered["window_end"] >= test_start].copy()
+            if (
+                len(train) >= 5
+                and len(test) >= 2
+                and train["failure_within_horizon"].nunique() == 2
+                and test["failure_within_horizon"].nunique() == 2
+            ):
+                return train, test
+
     cut = max(1, min(len(ordered) - 1, int(round(len(ordered) * (1 - test_fraction)))))
     return ordered.iloc[:cut].copy(), ordered.iloc[cut:].copy()
 
