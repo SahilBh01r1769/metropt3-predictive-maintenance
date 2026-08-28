@@ -20,6 +20,11 @@ def run_training_pipeline(csv_path: str | Path) -> dict:
     raw = pd.read_csv(csv_path)
     valid, report = validate_and_segment(raw, quarantine_path=ARTIFACT_DIR / "quarantine.csv")
     windows = build_windows(valid)
+    if windows.empty:
+        raise RuntimeError(
+            "No feature windows were produced. Inspect timestamp cadence, segmentation, "
+            "window length and validation quarantine counts."
+        )
     labeled = add_failure_labels(windows)
     labeled.to_csv(ARTIFACT_DIR / "window_features.csv", index=False)
     model, metrics, features = train_and_evaluate(
@@ -31,6 +36,7 @@ def run_training_pipeline(csv_path: str | Path) -> dict:
         "source": str(csv_path),
         "validation": report.__dict__,
         "windows": len(labeled),
+        "observed_cadence_seconds": sorted(labeled["cadence_seconds"].dropna().unique().tolist()),
         "features": features,
         "metrics": metrics.__dict__,
     }
