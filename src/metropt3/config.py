@@ -18,7 +18,10 @@ REQUIRED_COLS = [TIMESTAMP_COL, *ANALOGUE_COLS, *DIGITAL_COLS]
 
 WINDOW_SECONDS = 3600
 STEP_SECONDS = 1800
-MAX_GAP_SECONDS = 5
+# The UCI CSV is sampled more sparsely than a strict 1 Hz assumption. A gap
+# larger than 30 s is treated as a discontinuity; window coverage is derived
+# from each segment's observed median cadence in features.py.
+MAX_GAP_SECONDS = 30
 FAILURE_HORIZON_HOURS = 12
 
 # Broad physical sanity bounds. They are intentionally permissive and are
