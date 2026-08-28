@@ -15,6 +15,23 @@ def test_chronological_split_preserves_time_order():
     assert train["window_end"].max() < test["window_end"].min()
 
 
+def test_split_holds_out_final_positive_episode_when_viable():
+    dates = pd.date_range("2020-01-01", periods=40, freq="D")
+    target = np.zeros(40, dtype=int)
+    target[[5, 6, 18, 19, 33, 34]] = 1
+    df = pd.DataFrame({
+        "window_end": dates,
+        "in_failure": False,
+        "failure_within_horizon": target,
+        "f1": np.arange(40, dtype=float),
+    })
+    train, test = chronological_split(df, event_context_days=7)
+    assert train["window_end"].max() < test["window_end"].min()
+    assert train["failure_within_horizon"].sum() >= 2
+    assert test["failure_within_horizon"].sum() >= 1
+    assert pd.Timestamp("2020-02-04") in set(test["window_end"])
+
+
 def test_training_returns_metrics():
     n = 40
     y = np.array(([0, 1] * 20), dtype=int)
