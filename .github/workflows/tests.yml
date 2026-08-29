@@ -2,7 +2,7 @@ name: tests
 
 on:
   push:
-    branches: [main, portfolio/rebuild-metropt3]
+    branches: [main, demo/hosted-maintenance-dashboard]
   pull_request:
     branches: [main]
 
