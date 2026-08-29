@@ -1,10 +1,10 @@
 # MetroPT-3 Maintenance Dashboard Demo
 
-This directory contains the user-facing Streamlit visualization for the project.
+This directory contains the user-facing Streamlit condition-monitoring interface for the project.
 
 ## Purpose
 
-The demo is a condition-monitoring interface, not a replacement for the training pipeline. It lets a user explore sensor telemetry, data quality, segment-safe feature windows and a latest-window health/risk view without downloading the full MetroPT-3 dataset first.
+The demo lets a user explore sensor telemetry, data quality, segment-safe feature windows and a latest-window health/risk view without downloading the full MetroPT-3 dataset first. It is intentionally lightweight enough for public Streamlit hosting while the full training/data pipeline remains available in the repository.
 
 ## Data modes
 
@@ -18,9 +18,9 @@ Synthetic data is never used as model-evaluation evidence.
 
 If `artifacts/model.joblib` is available, the dashboard uses that trained model bundle for the latest compatible feature window.
 
-If no trained artifact is present, the dashboard shows a clearly labeled **heuristic demo health-risk indicator**. That indicator is a visualization aid, not an ML prediction.
+If no trained artifact is present, the dashboard shows a clearly labeled **heuristic demo health-risk indicator**. That indicator is a visualization aid, not a claimed ML prediction.
 
-The default verified Random Forest baseline is documented in `../RESULTS.md` and currently has weak held-out predictive performance. The demo does not conceal or override that result.
+The verified Random Forest baseline is documented in `../RESULTS.md`; the hosted interface does not conceal or replace those measured results.
 
 ## Run locally
 
@@ -32,15 +32,21 @@ pip install -e .
 streamlit run demo/app.py
 ```
 
+On this hosted-demo branch, the root entrypoint also works:
+
+```bash
+streamlit run streamlit_app.py
+```
+
 ## Streamlit Community Cloud
 
-The current demo is lightweight enough to deploy directly from the repository without the raw 208 MB dataset or a committed model artifact.
-
-Suggested configuration:
+Use:
 
 - Repository: `SahilBh01r1769/metropt3-predictive-maintenance`
-- Branch: `main`
-- Main file path: `demo/app.py`
+- Branch: `demo/hosted-maintenance-dashboard`
+- Main file path: `streamlit_app.py`
 - Python: 3.11
 
-The public deployment will start with the synthetic reference modes and CSV upload. A model artifact should only be bundled into a hosted demo after its provenance and evaluation are explicitly documented.
+No raw 200+ MB MetroPT CSV is required for the public demo. It starts with the built-in reference scenarios and accepts compatible CSV uploads from the user.
+
+A model artifact should only be bundled into the hosted branch when its provenance and evaluation remain explicitly documented.
