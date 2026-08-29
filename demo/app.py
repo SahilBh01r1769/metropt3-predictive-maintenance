@@ -25,24 +25,54 @@ st.markdown(
 <style>
 .block-container {max-width: 1320px; padding-top: 2rem;}
 .hero {padding: 1.4rem 1.6rem; border: 1px solid rgba(45,212,191,.25); border-radius: 18px;
-       background: linear-gradient(135deg, rgba(45,212,191,.10), rgba(17,28,46,.45)); margin-bottom: 1.2rem;}
+       background: linear-gradient(135deg, rgba(45,212,191,.10), rgba(17,28,46,.45)); margin-bottom: 1.1rem;}
 .hero h1 {margin: 0; font-size: 2.1rem;}
 .hero p {margin: .45rem 0 0; color: #a9b8cc;}
 .pill {display:inline-block; padding:.25rem .65rem; margin:.6rem .35rem 0 0; border-radius:999px;
        border:1px solid rgba(45,212,191,.35); color:#8ce9db; font-size:.78rem;}
 .risk-card {padding:1.2rem 1.4rem; border-radius:16px; border:1px solid rgba(148,163,184,.2); background:#111c2e;}
 .small-note {color:#94a3b8; font-size:.82rem;}
+.explain-card {padding:.9rem 1rem; border-radius:14px; border:1px solid rgba(148,163,184,.16); background:rgba(17,28,46,.55); min-height:104px;}
+.explain-kicker {font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:#5eead4; font-weight:700;}
+.explain-card h4 {margin:.25rem 0 .25rem 0; font-size:1rem;}
+.explain-card p {margin:0; color:#9fb0c5; font-size:.84rem; line-height:1.45;}
+.section-hint {color:#8fa2b8; font-size:.83rem; margin-top:-.35rem; margin-bottom:.7rem;}
 </style>
 <div class="hero">
   <h1>MetroPT-3 Predictive Maintenance</h1>
-  <p>Explore air-compressor sensor health, segment-safe feature windows and maintenance risk signals.</p>
-  <span class="pill">1 Hz sensor telemetry</span>
+  <p>Turn air-compressor sensor telemetry into condition signals that help identify when equipment may need attention.</p>
+  <span class="pill">Multivariate sensor telemetry</span>
   <span class="pill">Gap-safe segmentation</span>
   <span class="pill">Failure-horizon modeling</span>
 </div>
 """,
     unsafe_allow_html=True,
 )
+
+# A compact orientation layer: enough context to understand the workflow
+# without turning the dashboard into documentation.
+o1, o2, o3 = st.columns(3)
+with o1:
+    st.markdown(
+        """<div class="explain-card"><div class="explain-kicker">Objective</div>
+        <h4>Detect changing equipment condition</h4>
+        <p>Watch pressure, temperature and electrical behaviour for patterns that may precede maintenance events.</p></div>""",
+        unsafe_allow_html=True,
+    )
+with o2:
+    st.markdown(
+        """<div class="explain-card"><div class="explain-kicker">Method</div>
+        <h4>Summarize telemetry over time windows</h4>
+        <p>Validate readings, separate data gaps, then convert each continuous window into condition features.</p></div>""",
+        unsafe_allow_html=True,
+    )
+with o3:
+    st.markdown(
+        """<div class="explain-card"><div class="explain-kicker">Result</div>
+        <h4>Surface a maintenance-risk signal</h4>
+        <p>The latest window is summarized as Stable, Watch or High Attention alongside the signals behind it.</p></div>""",
+        unsafe_allow_html=True,
+    )
 
 
 def synthetic_frame(kind: str, seconds: int = 7200) -> pd.DataFrame:
@@ -82,15 +112,20 @@ def heuristic_risk(latest: pd.Series) -> float:
 
 with st.sidebar:
     st.header("Data source")
-    mode = st.radio("Choose input", ["Healthy reference", "Degradation scenario", "Upload MetroPT-style CSV"])
-    st.caption("Built-in scenarios are synthetic and exist only to demonstrate the dashboard workflow.")
+    mode = st.radio(
+        "Choose input",
+        ["Healthy reference", "Degradation scenario", "Upload MetroPT-style CSV"],
+        help="Use the two built-in scenarios to see how the dashboard responds to stable versus drifting sensor behaviour.",
+    )
+    st.caption("Built-in scenarios are synthetic and demonstrate the analysis workflow; they are not model-validation data.")
     uploaded = None
     if mode == "Upload MetroPT-style CSV":
         uploaded = st.file_uploader("CSV file", type=["csv"])
     st.divider()
     st.subheader("Windowing")
+    st.caption("A window groups nearby readings so condition is judged from a period of behaviour, not one isolated measurement.")
     window_minutes = st.slider("Window length", 10, 60, 60, 10)
-    step_minutes = st.slider("Step", 5, 30, 30, 5)
+    step_minutes = st.slider("Step", 5, 30, 30, 5, help="How far forward the analysis moves before creating the next window.")
 
 if mode == "Upload MetroPT-style CSV":
     if uploaded is None:
@@ -113,11 +148,16 @@ windows = build_windows(
     min_coverage=0.7,
 )
 
+st.markdown("### 1. Data preparation")
+st.markdown(
+    '<div class="section-hint">Before calculating condition, the pipeline checks sensor values and separates discontinuous periods so unrelated readings are not analyzed together.</div>',
+    unsafe_allow_html=True,
+)
 q1, q2, q3, q4 = st.columns(4)
-q1.metric("Valid rows", f"{report.valid_rows:,}")
-q2.metric("Quarantined", f"{report.quarantined_rows:,}")
-q3.metric("Continuous segments", report.segments)
-q4.metric("Feature windows", f"{len(windows):,}")
+q1.metric("Valid rows", f"{report.valid_rows:,}", help="Readings that passed schema and broad physical sanity checks.")
+q2.metric("Quarantined", f"{report.quarantined_rows:,}", help="Rows excluded because values were missing, duplicated or outside broad validation bounds.")
+q3.metric("Continuous segments", report.segments, help="Separate continuous stretches of telemetry. Analysis windows never cross a large timestamp gap.")
+q4.metric("Feature windows", f"{len(windows):,}", help="Time windows converted from raw readings into summarized condition features.")
 
 if windows.empty:
     st.warning("No complete feature windows could be built from this input.")
@@ -142,6 +182,12 @@ elif risk >= 0.34:
 else:
     status = "STABLE"
 
+st.markdown("### 2. Current condition")
+st.markdown(
+    '<div class="section-hint">The most recent analysis window is reduced to a condition summary. The nearby measurements show which operating signals contributed context to that result.</div>',
+    unsafe_allow_html=True,
+)
+
 left, right = st.columns([1, 2])
 with left:
     st.markdown(
@@ -151,37 +197,62 @@ with left:
         unsafe_allow_html=True,
     )
     st.markdown("#### Latest engineered window")
-    st.metric("Oil temperature mean", f"{latest['Oil_temperature_mean']:.1f} °C")
-    st.metric("Motor current mean", f"{latest['Motor_current_mean']:.2f} A")
-    st.metric("Compressor duty cycle", f"{latest['comp_duty_cycle']:.0%}")
-    st.metric("Pressure differential", f"{latest['pressure_diff_mean']:.2f} bar")
+    st.caption("A snapshot of the latest window after raw telemetry has been summarized into maintenance-oriented features.")
+    st.metric("Oil temperature mean", f"{latest['Oil_temperature_mean']:.1f} °C", help="Higher sustained temperature can indicate increasing thermal load or deteriorating operating conditions.")
+    st.metric("Motor current mean", f"{latest['Motor_current_mean']:.2f} A", help="Current provides a view of electrical/mechanical load on the compressor motor.")
+    st.metric("Compressor duty cycle", f"{latest['comp_duty_cycle']:.0%}", help="Share of the window during which the compressor was active.")
+    st.metric("Pressure differential", f"{latest['pressure_diff_mean']:.2f} bar", help="Difference between TP3 and TP2; changes can reveal altered pressure behaviour across the system.")
 
 with right:
     st.markdown("#### Sensor telemetry")
-    sensor = st.selectbox("Sensor", ANALOGUE_COLS, index=5)
+    st.caption("Inspect the original sensor signal over time. Different colors indicate separate continuous segments rather than one uninterrupted series.")
+    sensor = st.selectbox(
+        "Sensor",
+        ANALOGUE_COLS,
+        index=5,
+        help="Choose any analogue sensor to see the raw behaviour that ultimately feeds the engineered windows.",
+    )
     plot_df = valid[["timestamp", sensor, "segment_id"]].copy()
     fig = px.line(plot_df, x="timestamp", y=sensor, color="segment_id", labels={"timestamp": "Time"})
     fig.update_layout(height=430, legend_title_text="Segment", margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
-st.markdown("#### Window-level condition trends")
+st.markdown("### 3. Condition over time")
+st.markdown(
+    '<div class="section-hint">These are not raw readings. Each line tracks a feature calculated from successive windows, making gradual changes easier to see than in second-by-second telemetry.</div>',
+    unsafe_allow_html=True,
+)
 trend_cols = ["Oil_temperature_mean", "Motor_current_mean", "DV_pressure_mean", "pressure_diff_mean"]
 trend = windows[["window_end", *trend_cols]].melt("window_end", var_name="feature", value_name="value")
 fig2 = px.line(trend, x="window_end", y="value", facet_row="feature", color="feature")
 fig2.update_layout(height=650, showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
 st.plotly_chart(fig2, use_container_width=True)
 
+with st.expander("How to read this dashboard"):
+    st.markdown(
+        """
+**Raw telemetry → validated segments → time windows → condition features → risk signal**
+
+- **Raw telemetry** shows what the physical sensors measured.
+- **Feature windows** summarize a period of behaviour so short spikes do not dominate the decision.
+- **Condition trends** show whether those summaries are drifting over time.
+- **Stable / Watch / High Attention** is the final interpretation of the latest window, not a diagnosis of a specific component failure.
+
+For the hosted demo, the built-in scenarios are synthetic. The full repository can train a classifier against the published MetroPT-3 failure intervals using the real dataset.
+"""
+    )
+
 with st.expander("Data quality and range diagnostics"):
     st.dataframe(range_diagnostics(valid), use_container_width=True, hide_index=True)
     st.caption("Percentiles help tune sanity bounds from observed operating data; they are not failure thresholds.")
 
-with st.expander("How the production pipeline differs from this demo"):
+with st.expander("How the training pipeline differs from this hosted demo"):
     st.markdown(
         """
-- The repository training pipeline labels windows from the published MetroPT-3 failure intervals.
+- The full pipeline labels windows from the published MetroPT-3 failure intervals.
 - Active-failure windows are excluded from the pre-failure target.
 - Evaluation is chronological rather than random to reduce temporal leakage.
 - A trained `artifacts/model.joblib` is produced only after running on the real dataset.
-- This public dashboard can visualize uploaded data without pretending a bundled synthetic model is production-ready.
+- This public dashboard can visualize uploaded data without presenting synthetic scenarios as model-performance evidence.
 """
     )
