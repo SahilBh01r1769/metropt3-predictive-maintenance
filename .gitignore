@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.env
+.DS_Store
+
+# Large/raw data and generated artifacts
+data/*.csv
+data/*.parquet
+!data/README.md
+artifacts/*.joblib
+artifacts/*.json
+artifacts/*.csv
+!artifacts/.gitkeep
+
+.streamlit/secrets.toml
