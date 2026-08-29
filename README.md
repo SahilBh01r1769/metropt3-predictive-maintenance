@@ -1,73 +1,110 @@
 # MetroPT-3 Predictive Maintenance
 
 [![tests](https://github.com/SahilBh01r1769/metropt3-predictive-maintenance/actions/workflows/tests.yml/badge.svg)](https://github.com/SahilBh01r1769/metropt3-predictive-maintenance/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-red)
+![Dataset](https://img.shields.io/badge/Dataset-MetroPT--3-teal)
 
-A reproducible predictive-maintenance project built around the **MetroPT-3** air-compressor telemetry dataset. It validates and segments raw telemetry, builds cadence-aware time windows, engineers condition features, labels windows against published failure periods, evaluates a baseline chronologically, and exposes a Streamlit maintenance dashboard.
+> **From 1.5M+ rows of real metro air-compressor telemetry to a reproducible predictive-maintenance pipeline and interactive condition-monitoring dashboard.**
 
-> **Portfolio integrity:** this repository does not carry forward unverified historical RMSE/MAE, LSTM, or percentage-improvement claims. The current full-data baseline has been reproduced on a clean GitHub Actions runner and is documented in [`RESULTS.md`](RESULTS.md). Its predictive performance is weak; that result is reported rather than hidden.
+This project is an end-to-end predictive-maintenance case study built around the **MetroPT-3** dataset. It covers the complete workflow from raw industrial telemetry validation through gap-aware time-series segmentation, feature engineering, failure-horizon labeling, chronological evaluation, model artifact generation, and user-facing visualization.
 
-## What the project does
+The goal is not simply to train a classifier. The repository is structured around the harder engineering problems that appear in real sensor systems: irregular cadence, missing intervals, data-quality failures, temporal leakage, severe class imbalance, reproducible experimentation, and communicating model risk honestly.
 
-- Validates required MetroPT sensor columns and quarantines malformed/out-of-range rows.
-- Detects material timestamp gaps and assigns `segment_id` so windows never bridge discontinuities.
-- Derives each segment's observed median timestamp cadence instead of assuming one row per second.
-- Builds default **1-hour** windows stepped every **30 minutes**, with cadence-aware coverage checks.
-- Extracts sensor mean/std/min/max/rate-of-change plus pressure differential, compressor duty cycle, and motor-current volatility.
-- Converts the published air-leak periods into a configurable **future failure-within-horizon** target (default **12 hours**).
-- Excludes windows already inside an active failure from the predictive target.
-- Prefers a **final-event chronological holdout** to reduce temporal leakage while retaining positive test examples.
-- Trains a class-balanced Random Forest baseline and persists model/metrics artifacts.
-- Provides a Streamlit condition-monitoring dashboard with synthetic reference scenarios and compatible CSV upload.
+## Project highlights
 
-## Architecture
+| Area | Implementation |
+|---|---|
+| Scale | **1,516,948** raw telemetry rows processed in the verified full-data run |
+| Data quality | Schema/range validation, quarantine output, duplicate checks and timestamp-gap detection |
+| Time-series safety | Cadence-aware segmentation so feature windows never bridge discontinuities |
+| Feature pipeline | **38** model features from seven analogue sensors plus compressor behavior |
+| Prediction target | Configurable future failure-within-horizon classification using published air-leak periods |
+| Evaluation | Final-event chronological holdout designed to reduce temporal leakage |
+| Reproducibility | UCI downloader, CLI training pipeline, persisted model/metrics/run artifacts |
+| Visualization | Streamlit maintenance dashboard with condition trends, diagnostics and CSV upload |
+| Engineering quality | Python 3.11 package structure, automated tests and GitHub Actions CI |
+
+## System architecture
 
 ```mermaid
 flowchart LR
-    A[MetroPT-3 CSV] --> B[Schema + Range Validation]
+    A[MetroPT-3 Telemetry] --> B[Schema + Range Validation]
     B --> C[Quarantine Invalid Rows]
-    B --> D[Gap-based Segmentation]
-    D --> E[Cadence-aware Segment-safe Windows]
+    B --> D[Gap-aware Segmentation]
+    D --> E[Cadence-aware Time Windows]
     E --> F[Feature Engineering]
     F --> G[Published Failure Intervals]
-    G --> H[Future Failure-Horizon Labels]
+    G --> H[Failure-Horizon Labels]
     H --> I[Final-event Chronological Holdout]
     I --> J[Random Forest Baseline]
     J --> K[Metrics + Model Artifact]
-    F --> L[Streamlit Maintenance Dashboard]
+    F --> L[Streamlit Dashboard]
     K --> L
 ```
 
-## Verified full-data baseline
+## Why this pipeline is different from a notebook-only ML project
 
-The official UCI archive was downloaded and processed end to end in GitHub Actions.
+A straightforward random train/test split on MetroPT-3 can produce misleading results because neighboring windows from the same operating period may appear in both sets. Likewise, assuming a fixed one-row-per-second cadence can silently corrupt window coverage when the actual timestamps behave differently.
 
-- Raw rows: **1,516,948**
-- Valid rows: **1,515,830**
-- Quarantined rows: **1,118**
-- Gap-defined segments: **334**
-- Accepted-window median cadences: **10 s and 12 s**
-- Segment-safe feature windows: **8,012**
-- Model features: **38**
-- Train/test windows: **5,818 / 2,034**
-- Positive train/test windows: **72 / 24**
-- ROC-AUC: **0.4862**
-- Average precision: **0.0111**
-- Recall/F1 at the default threshold: **0 / 0**
+This repository therefore treats preprocessing and evaluation as first-class parts of the model:
 
-This baseline is therefore **not a useful failure predictor yet**. See [`RESULTS.md`](RESULTS.md) for the full interpretation and next modeling experiments. The important verified result at this stage is that the complete data/feature/label/model/demo pipeline is reproducible and leakage-conscious, not that the first model is production-ready.
+- feature windows are built **inside individual continuity segments**;
+- segment cadence is inferred from observed timestamps rather than assumed;
+- active-failure windows are separated from the pre-failure prediction target;
+- sampling cadence is retained for diagnostics but excluded from model inputs;
+- evaluation prefers a held-out final failure episode rather than a random split;
+- every reported metric is generated by the reproducible training pipeline.
+
+## Verified full-data run
+
+A clean GitHub Actions run downloaded the official UCI archive and executed the complete pipeline end to end.
+
+| Verified quantity | Result |
+|---|---:|
+| Raw rows | **1,516,948** |
+| Valid rows | **1,515,830** |
+| Quarantined rows | **1,118** |
+| Duplicate timestamps | **0** |
+| Continuity segments | **334** |
+| Observed accepted-window cadence | **10 s / 12 s** |
+| Segment-safe feature windows | **8,012** |
+| Model features | **38** |
+| Training windows | **5,818** |
+| Test windows | **2,034** |
+| Positive train/test windows | **72 / 24** |
+
+The same verification run generated the trained model artifact, validated the metrics and run-summary artifacts, and successfully launched the Streamlit dashboard with the model artifact present.
+
+## Baseline model status
+
+The current Random Forest is deliberately treated as a **research baseline**, not as a production-ready predictor.
+
+| Metric | Verified value |
+|---|---:|
+| Balanced accuracy | 0.5000 |
+| ROC-AUC | 0.4862 |
+| Average precision | 0.0111 |
+| Precision | 0.0000 |
+| Recall | 0.0000 |
+| F1 | 0.0000 |
+
+The held-out result shows that the current one-hour statistical feature set and 12-hour prediction horizon do not generalize well to the final failure episode. That result is useful: it prevents an easy random split from creating an inflated impression of model quality and provides a clean benchmark for stronger temporal features, alternate horizons and event-wise backtesting.
+
+Full details are in [`RESULTS.md`](RESULTS.md).
 
 ## Dataset
 
-MetroPT-3 contains multivariate telemetry collected from an Air Production Unit (APU) in an operational metro train, including pressure, temperature, motor-current and digital-control signals.
+**MetroPT-3** contains multivariate telemetry from an Air Production Unit (APU) operating in a metro train. The signals include pressure, temperature, motor current and digital control states associated with compressor behavior.
 
 - UCI dataset: **MetroPT-3**, dataset ID 791
 - DOI: `10.24432/C5VW3R`
 - License: **CC BY 4.0**
-- Associated paper: *The MetroPT dataset for predictive maintenance* (Veloso et al., 2022)
+- Associated publication: *The MetroPT dataset for predictive maintenance* — Veloso et al. (2022)
 
-The raw CSV is intentionally not committed.
+The large raw CSV is intentionally excluded from version control.
 
-### Download
+### Download the official dataset
 
 ```bash
 python scripts/download_data.py
@@ -79,33 +116,97 @@ The script retrieves the official UCI archive and extracts:
 data/MetroPT3(AirCompressor).csv
 ```
 
-See [`data/README.md`](data/README.md) for attribution and manual-download details.
+See [`data/README.md`](data/README.md) for dataset and attribution notes.
 
-## Target definition
+## Validation and segmentation
 
-For each feature window ending at time `t`:
+The validation layer checks the required timestamp, analogue and digital columns and quarantines invalid rows instead of silently discarding them.
+
+The real dataset also demonstrated why cadence needs to be derived from timestamps. Accepted feature windows in the verified run used median segment cadences of **10 and 12 seconds**, so the pipeline does not assume a universal 1 Hz row rate.
+
+`validate_and_segment()` creates a new segment when the timestamp gap exceeds the configured threshold (default **30 seconds**). `build_windows()` then computes coverage using the segment's observed median cadence.
+
+**Result:** a feature window can never combine samples from opposite sides of a material data gap.
+
+## Feature engineering
+
+For each analogue sensor:
+
+- mean
+- standard deviation
+- minimum
+- maximum
+- rate of change
+
+Sensors used:
+
+- `TP2`
+- `TP3`
+- `H1`
+- `DV_pressure`
+- `Reservoirs`
+- `Oil_temperature`
+- `Motor_current`
+
+Additional condition features include:
+
+- mean pressure differential (`TP3 - TP2`)
+- compressor duty cycle
+- motor-current volatility
+
+Default windowing:
+
+```text
+window length : 60 minutes
+step          : 30 minutes
+failure horizon: 12 hours
+```
+
+## Failure target
+
+For a feature window ending at time `t`:
 
 ```text
 failure_within_horizon = 1
 ```
 
-when the **next published failure starts after `t` and within the next 12 hours**. Windows whose end time is already inside a failure interval are marked `in_failure=True` and excluded from training/evaluation.
+when the next documented failure begins after `t` and within the configured prediction horizon.
 
-This is a failure-horizon classification problem. The repository does **not** claim to reconstruct continuous ground-truth Remaining Useful Life.
+Windows already inside a documented failure interval are marked separately and excluded from pre-failure training/evaluation.
 
-## Cadence-aware segmentation and windowing
-
-The real UCI CSV exposed why a fixed 1 Hz assumption is unsafe here. The accepted windows in the verified run used observed segment cadences of 10 and 12 seconds.
-
-`validate_and_segment()` starts a new segment when a timestamp gap exceeds the configured threshold (default **30 seconds**). `build_windows()` then derives each segment's median positive timestamp difference and computes expected window coverage from that cadence. No feature window crosses a segment boundary.
-
-`cadence_seconds` is kept as diagnostic metadata but excluded from model features so the classifier cannot learn a sampling-pattern shortcut.
+This repository models **future failure risk classification**. It does not claim that MetroPT-3 provides a continuous ground-truth Remaining Useful Life target.
 
 ## Evaluation strategy
 
-Random splitting is inappropriate for this time-series problem because it can leak future operating regimes into training. A plain tail split can also leave no positive examples after the final documented failure.
+Random splitting is avoided because it can leak future operating regimes and highly similar neighboring windows into training.
 
-The baseline therefore prefers a **final-event holdout**: when viable, testing begins several days before the final positive pre-failure window, keeping the last failure episode unseen during training while retaining both classes. A normal chronological tail split is only a fallback.
+The default evaluation therefore prefers a **final-event holdout**. When viable, the test period begins before the final pre-failure episode so that the final documented event remains unseen during training while the test data still contains both classes.
+
+A chronological tail split is retained as a fallback for compatible datasets where an event-aware holdout cannot be formed.
+
+## Interactive maintenance dashboard
+
+Run the dashboard with:
+
+```bash
+streamlit run demo/app.py
+```
+
+The interface provides:
+
+- sensor telemetry trends;
+- continuous-segment visualization;
+- validation and quarantine statistics;
+- latest engineered-window summaries;
+- oil-temperature, current and pressure condition indicators;
+- window-level condition trends;
+- sensor range diagnostics;
+- compatible MetroPT-style CSV upload;
+- optional trained-model probability when `artifacts/model.joblib` is present.
+
+For a hosted demo without a bundled model artifact, the interface uses clearly labeled synthetic reference scenarios and a **heuristic demonstration health indicator**. These are for product/UI visualization and are not reported as validation results.
+
+See [`demo/README.md`](demo/README.md) for deployment notes.
 
 ## Quick start
 
@@ -115,14 +216,30 @@ cd metropt3-predictive-maintenance
 python -m venv venv
 ```
 
-Activate the environment, then:
+Activate the environment, then install:
 
 ```bash
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
+```
+
+Download MetroPT-3:
+
+```bash
 python scripts/download_data.py
+```
+
+Run the complete training pipeline:
+
+```bash
 python -m metropt3.cli train
+```
+
+Use another compatible file with:
+
+```bash
+python -m metropt3.cli train --csv path/to/MetroPT3.csv
 ```
 
 Generated outputs:
@@ -133,28 +250,8 @@ artifacts/
 ├── metrics.json
 ├── run_summary.json
 ├── window_features.csv
-└── quarantine.csv        # when invalid rows exist
+└── quarantine.csv
 ```
-
-Use another compatible CSV with:
-
-```bash
-python -m metropt3.cli train --csv path/to/MetroPT3.csv
-```
-
-## Dashboard demo
-
-```bash
-streamlit run demo/app.py
-```
-
-The dashboard provides:
-
-- **Healthy reference** — synthetic telemetry for UI demonstration.
-- **Degradation scenario** — synthetic drifting telemetry for UI demonstration.
-- **Upload MetroPT-style CSV** — validation, segmentation, feature-window and sensor visualization for compatible data.
-
-If `artifacts/model.joblib` exists, the dashboard can show its latest-window probability. Without a model artifact, it displays a clearly labeled **heuristic demo health-risk indicator**, not an ML prediction. Synthetic scenarios are never presented as model-validation evidence.
 
 ## Tests and CI
 
@@ -164,9 +261,19 @@ pip install -e .
 python -m pytest -q
 ```
 
-Tests cover validation/quarantine, gap segmentation, sparse-cadence coverage, segment-safe windows, failure-horizon labels, chronological/final-event splitting and model-training behavior. GitHub Actions also compiles the package and starts Streamlit on a clean Python 3.11 runner.
+Automated coverage includes:
 
-A disposable full-data verification workflow was additionally used to validate the official UCI download, full training pipeline, generated artifacts and Streamlit startup with a real trained artifact.
+- schema and range validation;
+- quarantine behavior;
+- timestamp-gap segmentation;
+- sparse-cadence window coverage;
+- segment-safe feature generation;
+- failure-horizon labels;
+- chronological/final-event splitting;
+- model training smoke behavior;
+- Streamlit startup on a clean Python 3.11 runner.
+
+The repository was additionally verified with a disposable workflow that downloaded the complete UCI dataset, executed training, checked generated artifacts and started the dashboard with a real trained model artifact.
 
 ## Repository structure
 
@@ -176,9 +283,13 @@ A disposable full-data verification workflow was additionally used to validate t
 ├── .streamlit/config.toml
 ├── RESULTS.md
 ├── artifacts/
-├── data/README.md
-├── demo/app.py
-├── scripts/download_data.py
+├── data/
+│   └── README.md
+├── demo/
+│   ├── app.py
+│   └── README.md
+├── scripts/
+│   └── download_data.py
 ├── src/metropt3/
 │   ├── config.py
 │   ├── validation.py
@@ -193,14 +304,26 @@ A disposable full-data verification workflow was additionally used to validate t
 └── requirements-dev.txt
 ```
 
-## Limitations and next work
+## Next modeling experiments
 
-- The failure reports are intervals rather than dense labels for every timestamp.
-- The current 12-hour target is highly imbalanced and the verified Random Forest baseline is non-discriminative on the final-event holdout.
-- Validation bounds are broad sanity checks, not learned anomaly thresholds.
-- The final-event holdout is stronger than a random split but does not replace rolling-origin evaluation across all failure episodes.
-- Next work should compare prediction horizons, stronger temporal/lag features, calibrated boosting baselines, event-wise backtesting and only then sequence models such as LSTM/TCN/Transformers under the same leakage-safe policy.
+The current baseline creates a reproducible benchmark for the next stage:
+
+- rolling-origin evaluation across individual failure episodes;
+- 6 h / 24 h / 48 h failure horizons;
+- lag, slope and longer-term degradation features;
+- gradient-boosting baselines and probability calibration;
+- maintenance-cost-aware alert thresholds;
+- event-level recall and false-alarm analysis;
+- LSTM, TCN or Transformer sequence models evaluated under the same leakage-safe policy.
+
+## Scope and limitations
+
+- Published failure reports are intervals, not dense per-timestamp labels.
+- The default 12-hour target is highly imbalanced.
+- Current validation ranges are broad sanity checks, not learned anomaly limits.
+- The current Random Forest should be viewed as an engineering/research baseline.
+- Synthetic dashboard scenarios demonstrate interaction and visualization only.
 
 ## Attribution
 
-The MetroPT-3 data belongs to its dataset creators and is distributed by UCI under CC BY 4.0. This repository implements the validation, segmentation, cadence-aware windowing, feature engineering, labeling, baseline evaluation and visualization code around the public dataset; it does not claim ownership of the data.
+MetroPT-3 belongs to its dataset creators and is distributed by UCI under **CC BY 4.0**. This repository implements the validation, segmentation, cadence-aware windowing, feature engineering, labeling, evaluation and visualization pipeline around that public dataset; it does not claim ownership of the underlying data.
