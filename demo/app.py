@@ -18,31 +18,90 @@ from metropt3.features import build_windows
 from metropt3.modeling import predict_risk
 from metropt3.validation import range_diagnostics, validate_and_segment
 
-st.set_page_config(page_title="MetroPT-3 Maintenance Dashboard", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="MetroPT-3 Maintenance Dashboard", layout="wide")
 
 st.markdown(
     """
 <style>
-.block-container {max-width: 1320px; padding-top: 2rem;}
-.hero {padding: 1.4rem 1.6rem; border: 1px solid rgba(45,212,191,.25); border-radius: 18px;
-       background: linear-gradient(135deg, rgba(45,212,191,.10), rgba(17,28,46,.45)); margin-bottom: 1.2rem;}
-.hero h1 {margin: 0; font-size: 2.1rem;}
-.hero p {margin: .45rem 0 0; color: #a9b8cc;}
-.pill {display:inline-block; padding:.25rem .65rem; margin:.6rem .35rem 0 0; border-radius:999px;
-       border:1px solid rgba(45,212,191,.35); color:#8ce9db; font-size:.78rem;}
-.risk-card {padding:1.2rem 1.4rem; border-radius:16px; border:1px solid rgba(148,163,184,.2); background:#111c2e;}
-.small-note {color:#94a3b8; font-size:.82rem;}
+:root {
+  --page: #f1eee8;
+  --panel: #e6e0d6;
+  --panel-2: #ddd6cb;
+  --ink: #29251f;
+  --muted: #6c655c;
+  --line: #bdb4a8;
+  --rust: #82503a;
+  --slate: #50616d;
+}
+html, body, [data-testid="stAppViewContainer"] {
+  background: var(--page);
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+}
+[data-testid="stSidebar"] {
+  background: #e4ded4;
+  border-right: 1px solid var(--line);
+}
+.block-container { max-width: 1320px; padding-top: 2rem; }
+h1, h2, h3 { color: var(--ink) !important; letter-spacing: -0.02em; }
+.hero {
+  padding: 1.25rem 0 1rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 1.25rem;
+}
+.hero h1 { margin: 0; font-size: 2.1rem; }
+.hero p { margin: .45rem 0 0; color: var(--muted); max-width: 760px; }
+.context-line {
+  margin-top: .75rem;
+  color: var(--muted);
+  font-size: .8rem;
+  letter-spacing: .02em;
+}
+.risk-card {
+  padding: 1.1rem 1.2rem;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.small-note { color: var(--muted); font-size: .82rem; }
+[data-testid="stMetric"] {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 11px;
+  box-shadow: none;
+}
+.stButton > button,
+[data-baseweb="select"] > div,
+[data-testid="stFileUploaderDropzone"] {
+  border-radius: 3px !important;
+  box-shadow: none !important;
+}
+.skeleton {
+  height: 112px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  margin: 8px 0 16px;
+  animation: skeletonPulse 1.05s ease-in-out infinite;
+}
+@keyframes skeletonPulse { 0%,100% { opacity: .45; } 50% { opacity: .78; } }
 </style>
 <div class="hero">
   <h1>MetroPT-3 Predictive Maintenance</h1>
   <p>Explore air-compressor sensor health, segment-safe feature windows and maintenance risk signals.</p>
-  <span class="pill">1 Hz sensor telemetry</span>
-  <span class="pill">Gap-safe segmentation</span>
-  <span class="pill">Failure-horizon modeling</span>
+  <div class="context-line">SENSOR TELEMETRY / GAP-SAFE SEGMENTATION / FAILURE-HORIZON MODELING</div>
 </div>
 """,
     unsafe_allow_html=True,
 )
+
+
+def loading_placeholder():
+    slot = st.empty()
+    slot.markdown('<div class="skeleton"></div>', unsafe_allow_html=True)
+    return slot
 
 
 def synthetic_frame(kind: str, seconds: int = 7200) -> pd.DataFrame:
@@ -52,7 +111,7 @@ def synthetic_frame(kind: str, seconds: int = 7200) -> pd.DataFrame:
     degrading = kind == "Degradation scenario"
     ramp = np.linspace(0, 1, seconds) if degrading else np.zeros(seconds)
     comp = ((t // 90) % 2).astype(int)
-    data = pd.DataFrame(
+    return pd.DataFrame(
         {
             "timestamp": ts,
             "TP2": 1.3 + comp * 7.8 + rng.normal(0, 0.10, seconds) + 0.5 * ramp,
@@ -65,7 +124,6 @@ def synthetic_frame(kind: str, seconds: int = 7200) -> pd.DataFrame:
             "COMP": comp,
         }
     )
-    return data
 
 
 def heuristic_risk(latest: pd.Series) -> float:
@@ -100,18 +158,20 @@ if mode == "Upload MetroPT-style CSV":
 else:
     raw = synthetic_frame(mode)
 
+loading = loading_placeholder()
 try:
     valid, report = validate_and_segment(raw)
+    windows = build_windows(
+        valid,
+        window_seconds=window_minutes * 60,
+        step_seconds=step_minutes * 60,
+        min_coverage=0.7,
+    )
 except Exception as exc:
+    loading.empty()
     st.error(f"Input validation failed: {exc}")
     st.stop()
-
-windows = build_windows(
-    valid,
-    window_seconds=window_minutes * 60,
-    step_seconds=step_minutes * 60,
-    min_coverage=0.7,
-)
+loading.empty()
 
 q1, q2, q3, q4 = st.columns(4)
 q1.metric("Valid rows", f"{report.valid_rows:,}")
@@ -125,6 +185,7 @@ if windows.empty:
 
 latest = windows.iloc[-1]
 model_path = ARTIFACT_DIR / "model.joblib"
+model_loading = loading_placeholder()
 if model_path.exists():
     bundle = joblib.load(model_path)
     risk = float(predict_risk(bundle, windows.tail(1))[0])
@@ -133,7 +194,8 @@ if model_path.exists():
 else:
     risk = heuristic_risk(latest)
     risk_label = "Demo health-risk indicator"
-    risk_note = "Heuristic visualization only — not an ML prediction. Train the repository pipeline to generate a model artifact."
+    risk_note = "Heuristic visualization only, not an ML prediction. Train the repository pipeline to generate a model artifact."
+model_loading.empty()
 
 if risk >= 0.67:
     status = "HIGH ATTENTION"
@@ -160,14 +222,29 @@ with right:
     st.markdown("#### Sensor telemetry")
     sensor = st.selectbox("Sensor", ANALOGUE_COLS, index=5)
     plot_df = valid[["timestamp", sensor, "segment_id"]].copy()
-    fig = px.line(plot_df, x="timestamp", y=sensor, color="segment_id", labels={"timestamp": "Time"})
-    fig.update_layout(height=430, legend_title_text="Segment", margin=dict(l=10, r=10, t=20, b=10))
+    fig = px.line(
+        plot_df,
+        x="timestamp",
+        y=sensor,
+        line_group="segment_id",
+        labels={"timestamp": "Time"},
+        color_discrete_sequence=["#50616d"],
+    )
+    fig.update_traces(line={"color": "#50616d", "width": 1.4})
+    fig.update_layout(height=430, showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
     st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("#### Window-level condition trends")
 trend_cols = ["Oil_temperature_mean", "Motor_current_mean", "DV_pressure_mean", "pressure_diff_mean"]
 trend = windows[["window_end", *trend_cols]].melt("window_end", var_name="feature", value_name="value")
-fig2 = px.line(trend, x="window_end", y="value", facet_row="feature", color="feature")
+fig2 = px.line(
+    trend,
+    x="window_end",
+    y="value",
+    facet_row="feature",
+    color="feature",
+    color_discrete_sequence=["#82503a", "#50616d", "#5f6d59", "#756552"],
+)
 fig2.update_layout(height=650, showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
 st.plotly_chart(fig2, use_container_width=True)
 
@@ -182,6 +259,6 @@ with st.expander("How the production pipeline differs from this demo"):
 - Active-failure windows are excluded from the pre-failure target.
 - Evaluation is chronological rather than random to reduce temporal leakage.
 - A trained `artifacts/model.joblib` is produced only after running on the real dataset.
-- This public dashboard can visualize uploaded data without pretending a bundled synthetic model is production-ready.
+- This public dashboard can visualize uploaded data without presenting a synthetic demonstration as production-ready.
 """
     )
