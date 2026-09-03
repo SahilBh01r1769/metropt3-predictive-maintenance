@@ -7,6 +7,11 @@ from .config import ANALOGUE_COLS, STEP_SECONDS, TIMESTAMP_COL, WINDOW_SECONDS
 
 
 def _window_features(chunk: pd.DataFrame) -> dict[str, float]:
+    times = pd.to_datetime(chunk[TIMESTAMP_COL])
+    elapsed_hours = (times.iloc[-1] - times.iloc[0]).total_seconds() / 3600
+    if elapsed_hours <= 0:
+        raise ValueError("A feature window needs at least two increasing timestamps")
+
     out: dict[str, float] = {}
     for col in ANALOGUE_COLS:
         values = chunk[col].to_numpy(dtype=float)
@@ -14,7 +19,9 @@ def _window_features(chunk: pd.DataFrame) -> dict[str, float]:
         out[f"{col}_std"] = float(np.std(values))
         out[f"{col}_min"] = float(np.min(values))
         out[f"{col}_max"] = float(np.max(values))
-        out[f"{col}_roc"] = float((values[-1] - values[0]) / max(1, len(values) - 1))
+        out[f"{col}_roc_per_hour"] = float(
+            (values[-1] - values[0]) / elapsed_hours
+        )
     out["pressure_diff_mean"] = float((chunk["TP3"] - chunk["TP2"]).mean())
     out["comp_duty_cycle"] = float(chunk["COMP"].mean())
     out["motor_current_volatility"] = float(chunk["Motor_current"].diff().abs().mean())
