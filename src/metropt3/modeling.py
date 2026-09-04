@@ -35,6 +35,32 @@ def feature_columns(df: pd.DataFrame) -> list[str]:
     return [c for c in df.columns if c not in NON_FEATURE_COLS and pd.api.types.is_numeric_dtype(df[c])]
 
 
+def purge_overlapping_training_windows(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+) -> pd.DataFrame:
+    """Remove training windows that touch the test interval.
+
+    Feature extraction uses half-open windows: ``window_start <= timestamp <
+    window_end``. Keeping only training windows whose end is at or before the
+    earliest test-window start therefore guarantees that no raw timestamp can
+    contribute to both sides of the split.
+    """
+    required = {"window_start", "window_end"}
+    missing = required.difference(train.columns) | required.difference(test.columns)
+    if missing:
+        raise ValueError(
+            "Window bounds are required for overlap purging: "
+            + ", ".join(sorted(missing))
+        )
+    if train.empty or test.empty:
+        raise ValueError("Both provisional splits need at least one window")
+
+    test_interval_start = pd.to_datetime(test["window_start"]).min()
+    train_ends = pd.to_datetime(train["window_end"])
+    return train.loc[train_ends <= test_interval_start].copy()
+
+
 def chronological_split(
     df: pd.DataFrame,
     test_fraction: float = 0.2,
@@ -48,7 +74,20 @@ def chronological_split(
     tail split, usually preserves both classes in the test set. If that split
     is not viable, fall back to the final ``test_fraction`` of time.
     """
-    ordered = df.sort_values("window_end").reset_index(drop=True)
+    required = {"window_start", "window_end"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(
+            "Window bounds are required for chronological splitting: "
+            + ", ".join(sorted(missing))
+        )
+
+    ordered = df.copy()
+    ordered["window_start"] = pd.to_datetime(ordered["window_start"])
+    ordered["window_end"] = pd.to_datetime(ordered["window_end"])
+    if (ordered["window_end"] <= ordered["window_start"]).any():
+        raise ValueError("Each window_end must be later than window_start")
+    ordered = ordered.sort_values("window_end").reset_index(drop=True)
     if len(ordered) < 5:
         raise ValueError("Need at least 5 windows for evaluation")
 
@@ -58,16 +97,23 @@ def chronological_split(
             test_start = pd.Timestamp(positives.max()) - pd.Timedelta(days=event_context_days)
             train = ordered.loc[ordered["window_end"] < test_start].copy()
             test = ordered.loc[ordered["window_end"] >= test_start].copy()
-            if (
-                len(train) >= 5
-                and len(test) >= 2
-                and train["failure_within_horizon"].nunique() == 2
-                and test["failure_within_horizon"].nunique() == 2
-            ):
-                return train, test
+            if not train.empty and not test.empty:
+                train = purge_overlapping_training_windows(train, test)
+                if (
+                    len(train) >= 5
+                    and len(test) >= 2
+                    and train["failure_within_horizon"].nunique() == 2
+                    and test["failure_within_horizon"].nunique() == 2
+                ):
+                    return train, test
 
     cut = max(1, min(len(ordered) - 1, int(round(len(ordered) * (1 - test_fraction)))))
-    return ordered.iloc[:cut].copy(), ordered.iloc[cut:].copy()
+    train = ordered.iloc[:cut].copy()
+    test = ordered.iloc[cut:].copy()
+    train = purge_overlapping_training_windows(train, test)
+    if train.empty:
+        raise ValueError("Overlap purge removed every training window")
+    return train, test
 
 
 def train_and_evaluate(
