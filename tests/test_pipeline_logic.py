@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 
 from metropt3.features import _window_features, build_windows
+from metropt3.config import FAILURE_INTERVALS
 from metropt3.labels import add_failure_labels
 from metropt3.validation import validate_and_segment
 
@@ -72,6 +73,53 @@ def test_failure_horizon_label_before_known_failure():
     labeled = add_failure_labels(windows, horizon_hours=12)
     assert labeled["failure_within_horizon"].max() == 1
     assert not labeled["in_failure"].any()
+
+
+def test_window_overlapping_failure_end_is_marked_active():
+    _, failure_end, _ = FAILURE_INTERVALS[0]
+    failure_end = pd.Timestamp(failure_end)
+    windows = pd.DataFrame(
+        {
+            "window_start": [failure_end - pd.Timedelta(minutes=30)],
+            "window_end": [failure_end + pd.Timedelta(minutes=30)],
+        }
+    )
+
+    labeled = add_failure_labels(windows)
+
+    assert labeled.loc[0, "in_failure"]
+
+
+def test_window_ending_at_failure_start_is_predictive_not_active():
+    failure_start, _, _ = FAILURE_INTERVALS[0]
+    failure_start = pd.Timestamp(failure_start)
+    windows = pd.DataFrame(
+        {
+            "window_start": [failure_start - pd.Timedelta(hours=1)],
+            "window_end": [failure_start],
+        }
+    )
+
+    labeled = add_failure_labels(windows, horizon_hours=1)
+
+    assert not labeled.loc[0, "in_failure"]
+    assert labeled.loc[0, "failure_within_horizon"] == 1
+    assert labeled.loc[0, "hours_to_next_failure"] == 0.0
+
+
+def test_window_starting_at_failure_end_is_not_active():
+    _, failure_end, _ = FAILURE_INTERVALS[0]
+    failure_end = pd.Timestamp(failure_end)
+    windows = pd.DataFrame(
+        {
+            "window_start": [failure_end],
+            "window_end": [failure_end + pd.Timedelta(hours=1)],
+        }
+    )
+
+    labeled = add_failure_labels(windows)
+
+    assert not labeled.loc[0, "in_failure"]
 
 
 def test_rate_of_change_uses_elapsed_time_not_row_count():
