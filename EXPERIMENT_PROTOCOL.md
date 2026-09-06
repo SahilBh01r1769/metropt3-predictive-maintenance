@@ -1,189 +1,129 @@
-# Three-model horizon experiment protocol
+# Temporal representation experiment protocol
 
-Status: fixed before running the corrected comparison.
+Status: frozen before implementing or running the corrected comparison.
 
-This experiment asks two narrow questions:
+## Question
 
-1. Does prediction become more reliable when the target moves from 12 hours to
-   6, 3 or 1 hour before a documented failure?
-2. Under the same evidence, does a linear model, a bagged tree model or a
-   boosted tree model rank the held-out windows more usefully?
+Given one hour of compressor telemetry, which representation transfers most
+usefully to a later documented failure: engineered window summaries, learned
+temporal patterns, or learned patterns with attention over the history? The
+study also asks whether this changes at `1`, `3`, `6`, and `12` hours before a
+failure.
 
-The final July failure is one held-out episode. It is evidence about transfer to
-that episode, not an estimate of general performance across compressors or
-failure types.
+The final July failure is one untouched, held-out episode. It is evidence about
+transfer to that episode, not a claim of broad performance across compressors
+or failure types.
 
 ## Evidence held constant
 
-All 12 model/horizon combinations will use the same validated rows, continuity
-segments, one-hour feature windows, 30-minute step and 38-feature definitions.
-Rate-of-change features use elapsed hours. Windows overlapping a documented
-failure are quarantined before either split is formed.
+All cells use the same validated rows, continuity segmentation, one-hour
+history windows, 30-minute window step, documented failure intervals, and the
+same horizon labels. Rate-of-change is per elapsed time. A feature or sequence
+window that overlaps an active failure is quarantined before splitting.
 
-The test selection boundary is fixed independently of the horizon label:
+The test boundary is fixed independently of labels and horizon:
 
 - held-out failure start: `2020-07-15 14:30:00`;
-- test selection boundary: `2020-07-08 14:30:00`, seven days earlier;
-- a test window has `window_end >= test selection boundary`;
-- training windows must end at or before the earliest test-window start;
-- the raw-timestamp disjointness assertion must pass;
-- there is no chronological-tail fallback.
+- test selection boundary: `2020-07-08 14:30:00`;
+- test windows end on or after that boundary;
+- a training window is purged when any raw timestamp used by it belongs to the
+  test interval;
+- no chronological-tail fallback is allowed.
 
-If either split lacks a class at a particular horizon, the run is retained and
-the affected metric is reported as unavailable. The boundary will not be moved
-to manufacture a scorable result.
+If a cell lacks a class, the run remains an honest unscorable result; the
+boundary is not moved to manufacture a metric.
 
-## Predeclared models
+Before the first pilot, a data audit will record the observed sampling cadence,
+continuity gaps, sensor columns, and the resampling interval. The interval and
+all architecture sizes will then be frozen in versioned configuration before
+any final-holdout result is viewed. The audit is data description, not model
+selection.
 
-Every estimator receives the same median imputation and standard scaling inside
-a scikit-learn `Pipeline`. No hyperparameter search will be run on the held-out
-episode.
+## Predeclared representation ladder
 
-### Regularized Logistic Regression
+Exactly three models are compared. They form a progression in how much temporal
+structure the model is asked to learn rather than a model zoo.
 
-Linear baseline and reference for whether the engineered features contain a
-stable additive signal.
+| Level | Model | Input | Purpose |
+| --- | --- | --- | --- |
+| 1 | XGBoost | engineered one-hour summaries | Strong nonlinear tabular reference: can use interactions in the existing feature engineering. |
+| 2 | Temporal Convolutional Network (TCN) | resampled, ordered one-hour sensor sequence | Tests whether local and longer temporal patterns add evidence beyond summaries. |
+| 3 | Attention-TCN | same sequence and TCN encoder | Tests whether selectively pooling historical positions changes the ranking or alert burden. |
 
-```text
-penalty=l2
-C=1.0
-solver=liblinear
-class_weight=balanced
-max_iter=1000
-random_state=42
-```
+The TCN uses causal temporal convolutions: the representation at a window end
+uses only observations at or before that end. Attention pooling is applied to
+the encoded past sequence only. Its weights are diagnostic model focus, not a
+causal explanation of a physical failure.
 
-### Random Forest
+XGBoost receives the existing engineered features, including elapsed-time
+rate-of-change. The two sequence models receive the audited raw signal channels
+plus explicitly versioned derived channels. Imputation and normalization for
+each model are fitted on training data only. No model sees future samples,
+failure-period samples, or test-derived normalization statistics.
 
-Bagged nonlinear baseline, preserving the existing model configuration.
+Graph neural networks are excluded because this dataset does not supply a
+defensible graph. Transformers are excluded because four documented failure
+episodes are insufficient evidence for that capacity increase. A recurrent
+model is not added merely to make a ladder; the controlled question is
+summary-versus-convolutional temporal representation-versus-attention pooling.
 
-```text
-n_estimators=300
-class_weight=balanced_subsample
-min_samples_leaf=2
-random_state=42
-n_jobs=-1
-```
+## Development and final evaluation
 
-### Histogram Gradient Boosting
+The earlier documented failures are used only for rolling-origin development:
+to verify the pipeline, select the fixed operational threshold, and reject
+broken configurations. The final July episode is not used for architecture,
+feature, threshold, or epoch selection. A compact configuration, fixed seed,
+and early-stopping rule are written to the experiment configuration before the
+full run.
 
-Boosted nonlinear baseline for sequentially correcting errors without adding a
-model family beyond the three declared here.
+Every model is evaluated at `1`, `3`, `6`, and `12` hours. Changing the horizon
+changes only the target label; input history, split, and preprocessing rules do
+not change.
 
-```text
-learning_rate=0.1
-max_iter=100
-max_leaf_nodes=31
-min_samples_leaf=20
-l2_regularization=1.0
-class_weight=balanced
-random_state=42
-```
+Hypotheses:
 
-These configurations are frozen for the comparison. A convergence failure or
-unsupported parameter is a failed run to record, not permission to tune against
-the test episode. A necessary compatibility correction must be documented before
-the entire comparison is rerun.
+- Shorter horizons may be easier if this telemetry contains late precursors.
+- TCN may beat summary features if the order and duration of changes matter.
+- Attention-TCN may improve results only if different portions of the history
+  are consistently useful across separate failure episodes.
 
-## Horizons and hypotheses
+A collapse, a tie, or a worse attention model is a result: it limits what this
+dataset supports.
 
-Each model is evaluated at `1`, `3`, `6` and `12` hours. Only the target label
-changes; features, split boundary, preprocessing and estimator configuration do
-not.
+## Metrics and threshold policy
 
-The hypotheses are:
+Average precision is primary because positive windows are rare. Positive
+prevalence and `AP / prevalence` are reported to compare horizon difficulty.
+The remaining metrics are ROC-AUC when both classes exist, Brier score,
+balanced accuracy, precision, recall, F1, and confusion counts.
 
-- Shorter horizons will improve average-precision lift over prevalence if the
-  current features capture late precursors rather than long degradation trends.
-- The nonlinear models will outperform Logistic Regression if interactions
-  between pressure, current and compressor duty cycle transfer to the held-out
-  episode.
-- Histogram Gradient Boosting may approach or exceed Random Forest ranking with
-  a smaller serialized artifact. Timing and size are secondary observations,
-  not substitutes for predictive evidence.
+The reference hard threshold is `0.5` for every cell. One operational threshold
+may be selected from earlier rolling-origin development only, using a fixed
+rule recorded before the final run; it is then frozen and applied unchanged to
+the July holdout. Both reference and operational results are shown, never
+quietly substituted for each other.
 
-A collapse at every horizon rejects the idea that horizon length is the main
-problem. Similar performance from all three models weakens the claim that model
-family, rather than labels or representation, is the bottleneck.
+An alert is a chronological `0 -> 1` prediction transition. A negative
+prediction, gap, or segment boundary ends an alert run. A false alert begins on
+a negative-labelled window. The report includes false-alert episodes per
+evaluated day, held-out-event detection, and first-alert lead time. The latter
+is one case outcome per cell, not a population detection rate.
 
-## Threshold and alert policy
+## Required evidence
 
-The hard-prediction threshold is fixed at `0.5` for every model and horizon. It
-will not be selected from the final holdout. Average precision, ROC-AUC and Brier
-score will also be reported so conclusions do not depend only on that threshold.
+Each model/horizon run persists a per-window trace with model, horizon,
+segment ID, window start/end, true label, probability, reference prediction,
+operational prediction, and time to next failure. The run manifest records
+dataset identity, audit/resampling configuration, feature or channel names,
+normalization fit scope, split boundaries, counts, seeds, package versions,
+model parameters, fit/prediction time, parameter count where applicable, and
+serialized artifact size.
 
-For the operational alert view, one alert begins on a `0 -> 1` transition in
-chronological hard predictions. A negative prediction, segment change or
-non-contiguous window ends the run. An alert is false when its trigger window's
-true label is zero.
+Result tables compare models only within a horizon. Average precision is not
+averaged across horizons with different prevalence. A difference under `0.01`
+AP is reported as a practical tie, not as significance. Time and size are
+secondary, same-environment measurements.
 
-```text
-false alerts per evaluated day = false alert transitions / test-span days
-```
-
-This is a window-level simulation, not a claim about deployed maintenance
-operations.
-
-For the one held-out event, detection is positive when at least one predicted-
-positive window ends before the failure and within the evaluated horizon. Lead
-time is the interval from the first such window end to failure start. A missed
-event has no lead-time value. This produces one event outcome per cell, so it
-will be shown as a case result rather than a population rate.
-
-## Outputs required from each run
-
-Each of the 12 cells must persist an auditable test-window trace containing:
-
-```text
-model
-horizon_hours
-segment_id
-window_start
-window_end
-y_true
-probability
-prediction_at_0_5
-hours_to_next_failure
-```
-
-The run manifest must also record package versions, feature names, model
-parameters, split boundaries, row/window counts and random seed. Aggregate
-results alone are insufficient because they cannot locate false positives or
-reconstruct alert transitions.
-
-Reported metrics are:
-
-- average precision and positive prevalence;
-- ROC-AUC when both test classes exist;
-- balanced accuracy, precision, recall and F1 at 0.5;
-- true-negative, false-positive, false-negative and true-positive counts;
-- Brier score;
-- false alerts per evaluated day;
-- held-out-event detection and lead time where defined;
-- fit time, prediction time and serialized artifact size as secondary
-  same-run measurements.
-
-## Comparison rules
-
-Average precision is the primary ranking metric because positive windows are
-rare. Models are compared within a horizon; raw average precision will not be
-averaged across horizons with different prevalence. `AP / prevalence` is
-reported as descriptive lift for the horizon study.
-
-Differences smaller than `0.01` average precision are described as practically
-tied. No statistical significance claim will be made from one held-out event.
-Calibration, hard-prediction behavior and false-alert burden can disqualify an
-otherwise higher-ranking model, but they will not be combined into an invented
-single score.
-
-Fit time, prediction time and artifact size are compared only within the same
-execution environment. They describe implementation cost for this run and are
-not hardware-independent benchmarks.
-
-## Stop conditions
-
-The comparison stops and records the reason if timestamp disjointness fails,
-the final-event boundary changes between cells, feature columns differ, or a
-model receives information unavailable at its window end. Results from a
-partially completed or methodologically inconsistent grid will not be promoted
-to `RESULTS.md`.
+The run stops rather than reporting results if timestamp disjointness fails,
+window IDs differ unexpectedly across cells, labels vary under an otherwise
+identical horizon, or normalization includes holdout observations.
