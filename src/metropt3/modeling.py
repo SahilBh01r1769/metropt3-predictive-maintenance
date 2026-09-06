@@ -16,6 +16,8 @@ NON_FEATURE_COLS = {
     "failure_within_horizon", "in_failure", "hours_to_next_failure",
 }
 
+FINAL_EVENT_TEST_START = pd.Timestamp("2020-07-08 14:30:00")
+
 
 @dataclass
 class EvaluationMetrics:
@@ -63,17 +65,10 @@ def purge_overlapping_training_windows(
 
 def chronological_split(
     df: pd.DataFrame,
-    test_fraction: float = 0.2,
-    event_context_days: float = 7.0,
+    *,
+    test_start: str | pd.Timestamp = FINAL_EVENT_TEST_START,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return a leakage-safe chronological split.
-
-    When target labels are present, prefer a final-event holdout: the test set
-    begins several days before the final positive pre-failure window. This
-    keeps the last failure episode unseen during training and, unlike a naive
-    tail split, usually preserves both classes in the test set. If that split
-    is not viable, fall back to the final ``test_fraction`` of time.
-    """
+    """Split at a fixed, label-independent final-event boundary."""
     required = {"window_start", "window_end"}
     missing = required.difference(df.columns)
     if missing:
@@ -91,25 +86,17 @@ def chronological_split(
     if len(ordered) < 5:
         raise ValueError("Need at least 5 windows for evaluation")
 
-    if "failure_within_horizon" in ordered.columns:
-        positives = ordered.loc[ordered["failure_within_horizon"].astype(int) == 1, "window_end"]
-        if not positives.empty:
-            test_start = pd.Timestamp(positives.max()) - pd.Timedelta(days=event_context_days)
-            train = ordered.loc[ordered["window_end"] < test_start].copy()
-            test = ordered.loc[ordered["window_end"] >= test_start].copy()
-            if not train.empty and not test.empty:
-                train = purge_overlapping_training_windows(train, test)
-                if (
-                    len(train) >= 5
-                    and len(test) >= 2
-                    and train["failure_within_horizon"].nunique() == 2
-                    and test["failure_within_horizon"].nunique() == 2
-                ):
-                    return train, test
+    boundary = pd.Timestamp(test_start)
+    if pd.isna(boundary):
+        raise ValueError("test_start must be a valid timestamp")
 
-    cut = max(1, min(len(ordered) - 1, int(round(len(ordered) * (1 - test_fraction)))))
-    train = ordered.iloc[:cut].copy()
-    test = ordered.iloc[cut:].copy()
+    train = ordered.loc[ordered["window_end"] < boundary].copy()
+    test = ordered.loc[ordered["window_end"] >= boundary].copy()
+    if train.empty or test.empty:
+        raise ValueError(
+            f"Fixed holdout boundary {boundary} must leave windows on both sides"
+        )
+
     train = purge_overlapping_training_windows(train, test)
     if train.empty:
         raise ValueError("Overlap purge removed every training window")
@@ -122,9 +109,10 @@ def train_and_evaluate(
     model_path: str | Path | None = None,
     metrics_path: str | Path | None = None,
     random_state: int = 42,
+    test_start: str | pd.Timestamp = FINAL_EVENT_TEST_START,
 ) -> tuple[RandomForestClassifier, EvaluationMetrics, list[str]]:
     data = windows.loc[~windows["in_failure"]].dropna(subset=["failure_within_horizon"]).copy()
-    train, test = chronological_split(data)
+    train, test = chronological_split(data, test_start=test_start)
     cols = feature_columns(data)
     if not cols:
         raise ValueError("No numeric feature columns found")
