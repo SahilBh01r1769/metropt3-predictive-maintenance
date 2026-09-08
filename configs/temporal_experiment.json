@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "study_id": "metropt_temporal_representation_v1",
+  "audit_evidence": {
+    "summary_path": "evidence/data_audit_summary.json",
+    "audit_code_revision": "a83483be17474f7bcccc8766d332b24dc3ebad5b",
+    "dataset_sha256": "db30ccb4ea402e3c8bf2c99db06e288d4f2a772f6928f9dbe26a920d69793e24"
+  },
+  "windows": {
+    "history_seconds": 3600,
+    "step_seconds": 1800,
+    "minimum_coverage": 0.8,
+    "maximum_gap_seconds": 30
+  },
+  "targets": {
+    "horizon_hours": [1, 3, 6, 12],
+    "failure_interval_semantics": "half_open",
+    "exclude_active_failure_windows": true
+  },
+  "sequence": {
+    "resample_interval_seconds": 30,
+    "timesteps": 120,
+    "channels": [
+      "TP2",
+      "TP3",
+      "H1",
+      "DV_pressure",
+      "Reservoirs",
+      "Oil_temperature",
+      "Motor_current",
+      "COMP"
+    ],
+    "aggregation": {
+      "analogue_channels": "mean",
+      "COMP": "mean"
+    },
+    "missing_bins": {
+      "analogue_channels": "linear_within_segment",
+      "COMP": "forward_fill_within_segment",
+      "maximum_consecutive_bins": 1,
+      "fallback_fitted_on_training": "channel_median",
+      "append_bin_observed_fraction": true
+    },
+    "normalization": {
+      "analogue_channels": "standard_score",
+      "COMP": "unchanged",
+      "bin_observed_fraction": "unchanged",
+      "fit_scope": "training_only"
+    }
+  },
+  "split": {
+    "final_holdout_start": "2020-07-08 14:30:00",
+    "final_failure_start": "2020-07-15 14:30:00",
+    "purge_raw_timestamp_overlap": true,
+    "development_folds": [
+      {
+        "name": "may_failure",
+        "validation_start": "2020-05-22 23:30:00",
+        "validation_end": "2020-05-29 23:30:00"
+      },
+      {
+        "name": "june_failure",
+        "validation_start": "2020-05-30 06:00:00",
+        "validation_end": "2020-06-05 10:00:00"
+      }
+    ]
+  },
+  "models": {
+    "order": ["xgboost", "tcn", "attention_tcn"],
+    "xgboost": {
+      "implementation": "xgboost.XGBClassifier",
+      "maximum_estimators": 500,
+      "learning_rate": 0.05,
+      "max_depth": 3,
+      "min_child_weight": 3,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 1.0,
+      "objective": "binary:logistic",
+      "evaluation_metric": "aucpr",
+      "tree_method": "hist",
+      "scale_pos_weight": "training_fold_negative_to_positive_ratio",
+      "early_stopping_rounds": 30
+    },
+    "shared_tcn_encoder": {
+      "residual_channels": [32, 32, 32, 32, 32],
+      "kernel_size": 3,
+      "dilations": [1, 2, 4, 8, 16],
+      "convolutions_per_block": 2,
+      "dropout": 0.2,
+      "causal": true
+    },
+    "tcn": {
+      "encoder": "shared_tcn_encoder",
+      "pooling": "last_valid_timestep"
+    },
+    "attention_tcn": {
+      "encoder": "shared_tcn_encoder",
+      "pooling": "additive_attention",
+      "attention_hidden_size": 32
+    }
+  },
+  "training": {
+    "seeds": [17, 42, 89],
+    "primary_seed": 42,
+    "batch_size": 64,
+    "maximum_epochs": 100,
+    "optimizer": "adamw",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "loss": "binary_cross_entropy_with_training_fold_pos_weight",
+    "gradient_clip_norm": 1.0,
+    "early_stopping": {
+      "monitor": "average_precision",
+      "mode": "max",
+      "patience": 12,
+      "minimum_delta": 0.001,
+      "restore_best_weights": true
+    },
+    "final_refit_length_rule": "median_best_iteration_across_development_folds"
+  },
+  "thresholds": {
+    "reference": 0.5,
+    "operational_selection_scope": "pooled_development_fold_predictions_only",
+    "selected_per": "model_and_horizon_across_all_seeds",
+    "candidate_start": 0.05,
+    "candidate_stop": 0.95,
+    "candidate_step": 0.01,
+    "objective": "f_beta",
+    "beta": 2.0,
+    "tie_breakers": [
+      "lower_false_alert_episodes_per_day",
+      "higher_threshold"
+    ]
+  },
+  "reporting": {
+    "primary_seed_for_window_traces": 42,
+    "aggregate_seed_metrics": ["mean", "standard_deviation"],
+    "average_precision_is_primary": true,
+    "practical_ap_tie": 0.01,
+    "attention_weights_are_not_causal_explanations": true
+  }
+}

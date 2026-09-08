@@ -1,6 +1,9 @@
 # Temporal representation experiment protocol
 
-Status: frozen before implementing or running the corrected comparison.
+Status: frozen before implementing or running the corrected comparison. The
+measured audit evidence is summarized in `evidence/data_audit_summary.json`;
+the resulting executable decisions are fixed in
+`configs/temporal_experiment.json`.
 
 ## Question
 
@@ -33,11 +36,11 @@ The test boundary is fixed independently of labels and horizon:
 If a cell lacks a class, the run remains an honest unscorable result; the
 boundary is not moved to manufacture a metric.
 
-Before the first pilot, a data audit will record the observed sampling cadence,
-continuity gaps, sensor columns, and the resampling interval. The interval and
-all architecture sizes will then be frozen in versioned configuration before
-any final-holdout result is viewed. The audit is data description, not model
-selection.
+The data audit measured a 10-second median cadence, 12 seconds at the 99th
+percentile, 8,012 complete feature windows and 334 continuity segments. The
+sequence path therefore aggregates into 30-second means: 120 ordered steps per
+one-hour window. This absorbs normal cadence jitter without reducing the history
+to minute-level summaries. The audit is data description, not model selection.
 
 ## Predeclared representation ladder
 
