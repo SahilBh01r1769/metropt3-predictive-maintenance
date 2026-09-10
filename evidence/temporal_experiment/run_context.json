@@ -1,0 +1,15 @@
+{
+  "code_revision": "78b8afa2a9c81a8f0dc7b0e9d231f5d6fde335d1",
+  "dataset_sha256": "db30ccb4ea402e3c8bf2c99db06e288d4f2a772f6928f9dbe26a920d69793e24",
+  "validated_rows": 1515830,
+  "quarantined_rows": 1118,
+  "feature_windows": 8012,
+  "predictive_sequence_windows": 7846,
+  "sequence_shape": [
+    7846,
+    120,
+    9
+  ],
+  "mean_bin_observed_fraction": 0.9943158030509949,
+  "device": "Tesla T4"
+}

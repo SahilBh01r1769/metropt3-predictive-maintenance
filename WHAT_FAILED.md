@@ -1,136 +1,101 @@
 # What failed
 
-This is an investigation record, not a defense of the baseline. The first full-data
-run produced a working pipeline and an unusable predictor. Two correctness fixes
-were made afterward, so the old metrics are historical evidence rather than current
-performance claims.
+The final experiment is a negative modeling result. That is not hidden: the three
+representations mostly fail to rank windows before the July failure above normal
+operation.
 
-## The result that forced the investigation
+## 1. The original Random Forest result was not auditable
 
-The historical final-event holdout contained 2,034 windows, including 24 positive
-windows. The Random Forest reported:
+The earlier baseline saved aggregate scores but not per-window probabilities. It also
+predated two correctness fixes: rate of change was measured per observation rather
+than per elapsed time, and raw timestamps could be shared across the temporal split.
 
-| Metric | Historical result |
-|---|---:|
-| Balanced accuracy | 0.5000 |
-| ROC-AUC | 0.4862 |
-| Average precision | 0.0111 |
-| Precision | 0.0000 |
-| Recall | 0.0000 |
-| F1 | 0.0000 |
+Those historical numbers are no longer current evidence. The replacement experiment
+stores every development and holdout probability, window identity, label, threshold,
+training history and manifest.
 
-Only 1.18% of the test windows were positive. Average precision was 1.11%, roughly
-the same as—and slightly below—the positive prevalence. ROC-AUC was also below
-0.5. The model did not merely choose a bad alert threshold; its ranking contained
-no useful evidence that the final failure's positive windows belonged above the
-negative windows.
+## 2. The July episode did not resemble the learned positive ranking
 
-## What predictions did it actually make?
+XGBoost is the best model at all four horizons, yet its mean ROC-AUC ranges only from
+0.420 to 0.456. Its three-, six- and twelve-hour AP is approximately equal to positive
+prevalence. The sequence models are worse: every mean AP lift is below `0.8×`, and
+their mean ROC-AUC never exceeds 0.180.
 
-The saved metrics establish one fact: none of the 24 positive test windows became
-a true-positive hard prediction at the default threshold.
+This is stronger evidence than “the 0.5 threshold was wrong.” Ranking metrics do not
+depend on that single cutoff. The models generally assign higher risk to ordinary July
+windows than to the actual pre-failure windows.
 
-The combination of zero recall and balanced accuracy of 0.5000 is consistent with
-predicting every test window as negative. It is not enough to prove that exact
-confusion matrix, because only rounded aggregate metrics were retained. A very
-small number of false positives could be hidden by rounding. The run did not save
-per-window probabilities, predictions, or a confusion matrix, so I cannot honestly
-reconstruct more detail after the fact.
+The likely explanation is episode shift combined with too few independent events.
+There are many overlapping windows but only four published air-leak intervals. Window
+count does not create new independent failure mechanisms.
 
-That missing trace is itself a failure in the experiment. The pipeline saved a model
-and summary scores, but not enough evidence to audit individual decisions.
+## 3. Preserving within-hour order did not help
 
-## Where did false positives concentrate?
+The TCN sees ordered 30-second aggregates instead of 38 summary statistics. It should
+benefit if short transients or ordering inside the hour transfer across events. It does
+not: its AP is below prevalence at every horizon.
 
-This cannot be answered from the retained artifacts. There is no verified record
-linking a false alert to its timestamp, continuity segment, sensor values, distance
-to a failure, or operating state.
+Possible reasons remain hypotheses rather than findings:
 
-Possible concentrations—compressor transitions, high motor current, pressure
-changes, or the edges of continuity segments—remain hypotheses. Presenting any of
-them as an observed pattern would invent a result. A corrected evaluation run must
-persist at least the window boundaries, true label, predicted label, and probability
-before this question can be answered.
+- the useful context may be longer than one hour;
+- event-specific operating regimes may dominate a shared precursor;
+- thirty-second aggregation may remove useful short transients;
+- the development folds may not contain enough distinct positive behavior for neural
+  early stopping.
 
-## How were true failure windows different from what the model expected?
+The current experiment cannot distinguish these explanations without adding new
+independent failure episodes or changing the predeclared question.
 
-The ranking metrics provide the only defensible answer so far: the current feature
-representation did not assign higher risk to the final episode's positive windows
-than to ordinary windows. They do not reveal which feature relationships changed.
+## 4. Attention added complexity, not evidence
 
-The model sees one-hour summaries: mean, standard deviation, minimum, maximum and
-endpoint rate of change for seven analogue sensors, plus pressure difference,
-compressor duty cycle and motor-current volatility. These features compress each
-hour into 38 values. They can discard ordering inside the hour, short transients,
-recovery cycles and longer degradation history. This is a plausible explanation for
-failure, but it has not yet been isolated experimentally.
+Attention-TCN shares the exact encoder used by TCN, so the comparison isolates pooling.
+It adds 1,089 trainable parameters but produces lower mean AP than TCN at six and twelve
+hours and essentially the same collapse at one and three hours.
 
-Feature importance would not solve this question by itself. It would describe which
-variables the forest used in training, not why their relationships failed to transfer
-to the held-out event. Answering that requires comparing the distributions and
-prediction traces of earlier-event and final-event windows.
+Attention weights are retained for inspection, but they are not causal explanations.
+When the model's held-out ranking is poor, presenting its high-weight timesteps as a
+failure signature would be especially misleading.
 
-## Was the 12-hour horizon too difficult?
+## 5. Development-selected thresholds did not transfer cleanly
 
-It may be, but the baseline does not prove it.
+Thresholds were selected from pooled May/June development predictions by F2, never
+from July. They detect the July event in several cells, but the apparent success comes
+with low precision and frequent false-alert episodes.
 
-Twelve hours was an initial design choice rather than the winner of a controlled
-comparison. At that horizon, only 72 of 5,818 historical training windows and 24 of
-2,034 test windows were positive. This gives the classifier little positive evidence,
-and a twelve-hour label may include windows before a detectable signal appears.
+For example, XGBoost detects the event in all seeds at the 12-hour horizon, but mean
+precision is 1.18% and the policy produces 1.49 false-alert episodes per evaluated day.
+At the default 0.5 threshold, no model detects the event in any cell.
 
-The next modeling experiment will keep the split, feature set, model configuration
-and metrics fixed while changing only the horizon to 1, 3, 6 and 12 hours. If shorter
-horizons improve event recall and probability ranking, that will support the claim
-that useful precursors occur closer to failure. If all four collapse, horizon length
-is not the main problem.
+This demonstrates why “event detected” cannot be reported alone. It must be paired
+with ranking, precision and alert burden.
 
-## How many failure episodes are available?
+## 6. The horizon hypothesis was only partly informative
 
-The configuration contains four published air-leak intervals:
+Absolute AP increases toward twelve hours because positive prevalence also increases.
+After normalizing by prevalence, XGBoost's clearest lift occurs at one hour (`1.63×`),
+but that setting detects the held-out event in only one of three seeds and produces
+3.44 false-alert episodes per day at the operational threshold.
 
-| Episode | Approximate duration |
-|---|---:|
-| 2020-04-18 | 24 hours |
-| 2020-05-29 to 2020-05-30 | 6.5 hours |
-| 2020-06-05 to 2020-06-07 | 52.5 hours |
-| 2020-07-15 | 4.5 hours |
+The study therefore does not identify a useful horizon. It shows that closer prediction
+is somewhat easier to rank for XGBoost, but still not operationally credible.
 
-Four episodes are enough to expose a failure of generalization, but not enough to
-support a broad claim about air-compressor failures. Holding out the final episode
-also means that model selection has very few independent events available.
+## 7. The exported evidence has a reproducibility boundary
 
-## Do different failure modes look alike to the model?
+Colab validated all checkpoints before export. The returned ZIP contains manifests,
+histories, probabilities, combined predictions, metrics and attention weights, but not
+the model binaries retained in Drive. The exported traces and metrics were independently
+hash-checked and recomputed; prediction recreation still requires retraining.
 
-The repository cannot answer this. All four intervals are labeled `air_leak`; no
-verified subtype or component-level cause is supplied to the model. Duration differs
-substantially, but duration is not a failure mode.
+That limitation is recorded in the evidence directory rather than treating internal
+validation as proof that the bundle is fully self-contained.
 
-The current binary target therefore asks whether one feature representation transfers
-across four air-leak episodes. It does not demonstrate generalization across different
-mechanical failure types, and the documentation should not imply otherwise.
+## Conclusion
 
-## Corrections made after the historical run
+The strongest defensible outcome is methodological: corrected elapsed-time features,
+active-failure quarantine, fixed temporal holdout, raw-timestamp purge, training-only
+normalization, predeclared comparisons and auditable prediction traces all survived a
+full-data run.
 
-Two problems mean the published baseline must be rerun before it can be treated as
-the result of the current code:
-
-1. Rate of change was divided by observation count. It is now divided by elapsed
-   time and reported per hour.
-2. Chronological window records could still share raw timestamps across the split.
-   Training windows touching the test interval are now explicitly purged.
-
-These corrections improve the validity of the experiment. They do not guarantee a
-better metric, and no corrected metric will be claimed until it is produced.
-
-## Current conclusion
-
-The Random Forest baseline failed on the held-out final episode, and the retained
-artifacts are insufficient for a detailed error analysis. The useful result is
-narrower: aggregate performance exposed no transferable signal at the chosen
-horizon, while the investigation uncovered weaknesses in both feature calculation
-and evaluation evidence.
-
-The next run must produce auditable predictions, not just another score table. Until
-then, claims about false-positive locations, sensor-specific failure signatures, and
-the benefit of a shorter horizon remain open questions.
+The modeling conclusion is narrower and negative. None of the three models establishes
+a transferable warning signal for the held-out July episode. XGBoost fails least;
+TCN and attention add cost without improving the evidence.
