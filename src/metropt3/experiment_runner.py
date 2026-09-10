@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import random
 import shutil
+import subprocess
 import time
 from typing import Any, Protocol
 import uuid
@@ -95,6 +96,19 @@ def _package_versions() -> dict[str, str | None]:
         except importlib.metadata.PackageNotFoundError:
             versions[package] = None
     return versions
+
+
+def _code_revision() -> str | None:
+    revision = os.environ.get("METROPT_CODE_REVISION")
+    if revision:
+        return revision
+    root = Path(__file__).resolve().parents[2]
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=root, text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def _labeled_dataset(dataset: SequenceDataset, horizon_hours: int) -> SequenceDataset:
@@ -491,7 +505,12 @@ class DefaultCellTrainer:
         )
 
 
-def _cell_complete(cell_path: Path, spec: CellSpec, config_sha: str) -> bool:
+def _cell_complete(
+    cell_path: Path,
+    spec: CellSpec,
+    config_sha: str,
+    code_revision: str | None,
+) -> bool:
     manifest_path = cell_path / "manifest.json"
     if not manifest_path.exists():
         return False
@@ -502,6 +521,8 @@ def _cell_complete(cell_path: Path, spec: CellSpec, config_sha: str) -> bool:
     if manifest.get("status") != "complete" or manifest.get("cell") != asdict(spec):
         return False
     if manifest.get("config_sha256") != config_sha:
+        return False
+    if code_revision is not None and manifest.get("code_revision") != code_revision:
         return False
     file_hashes = manifest.get("file_sha256", {})
     required = {
@@ -520,6 +541,19 @@ def _cell_complete(cell_path: Path, spec: CellSpec, config_sha: str) -> bool:
     return True
 
 
+def cell_checkpoint_valid(
+    cell_path: str | Path,
+    spec: CellSpec,
+    config: dict[str, Any],
+) -> bool:
+    return _cell_complete(
+        Path(cell_path),
+        spec,
+        _config_sha256(config),
+        _code_revision(),
+    )
+
+
 def run_cell(
     spec: CellSpec,
     dataset: SequenceDataset,
@@ -532,8 +566,9 @@ def run_cell(
     if spec not in experiment_cells(experiment):
         raise ValueError(f"Cell is outside the frozen experiment matrix: {spec.key}")
     config_sha = _config_sha256(experiment)
+    code_revision = _code_revision()
     cell_path = Path(output_root) / spec.key
-    if _cell_complete(cell_path, spec, config_sha):
+    if _cell_complete(cell_path, spec, config_sha, code_revision):
         return "skipped"
     if cell_path.exists():
         raise RuntimeError(f"Invalid completed checkpoint requires review: {cell_path}")
@@ -591,6 +626,7 @@ def run_cell(
             "status": "complete",
             "cell": asdict(spec),
             "config_sha256": config_sha,
+            "code_revision": code_revision,
             "dataset_sha256": experiment["audit_evidence"]["dataset_sha256"],
             "inputs": inputs,
             "model_parameters": model_parameters,
@@ -673,10 +709,11 @@ def finalize_model_horizon(
     development_frames = []
     holdout_frames = []
     config_sha = _config_sha256(config)
+    code_revision = _code_revision()
     for seed in config["training"]["seeds"]:
         spec = CellSpec(model, horizon_hours, int(seed))
         cell_path = Path(output_root) / spec.key
-        if not _cell_complete(cell_path, spec, config_sha):
+        if not _cell_complete(cell_path, spec, config_sha, code_revision):
             return False
         development_frames.append(
             pd.read_csv(cell_path / "development_predictions.csv")

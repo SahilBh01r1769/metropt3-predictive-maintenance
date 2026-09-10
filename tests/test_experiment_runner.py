@@ -14,6 +14,7 @@ from metropt3.experiment_runner import (
     run_experiment,
     select_operational_threshold,
 )
+from metropt3.experiment_evidence import validate_and_summarize_experiment
 from metropt3.sequences import SequenceDataset
 from metropt3.temporal_models import build_temporal_model
 
@@ -50,6 +51,12 @@ class FakeTrainer:
             prediction_seconds=0.1,
             parameter_count=12,
             model_complexity={"trainable_parameters": 12},
+            attention_weights=(
+                np.full((2, config["sequence"]["timesteps"]), 1 / config["sequence"]["timesteps"])
+                if spec.model == "attention_tcn"
+                and spec.seed == config["reporting"]["primary_seed_for_window_traces"]
+                else None
+            ),
         )
 
 
@@ -184,6 +191,33 @@ def test_complete_seed_group_gets_one_development_selected_threshold(tmp_path):
     assert {"reference_prediction", "operational_prediction"}.issubset(
         predictions.columns
     )
+
+
+def test_complete_experiment_exports_valid_metrics_and_attention_evidence(tmp_path):
+    config = load_experiment_config()
+    run_experiment(
+        synthetic_dataset(), tmp_path, config=config, trainer=FakeTrainer()
+    )
+
+    metrics, report = validate_and_summarize_experiment(
+        tmp_path,
+        config=config,
+        output_csv=tmp_path / "metrics.csv",
+        report_path=tmp_path / "validation.json",
+    )
+
+    assert report == {
+        "valid": True,
+        "complete_cells": 36,
+        "expected_cells": 36,
+        "metric_rows": 72,
+        "code_revision": report["code_revision"],
+        "errors": [],
+    }
+    assert report["code_revision"]
+    assert len(metrics) == 72
+    assert metrics["average_precision"].notna().all()
+    assert (tmp_path / "metrics.csv").exists()
 
 
 def test_false_alert_episode_resets_on_gap_and_segment_boundary():
