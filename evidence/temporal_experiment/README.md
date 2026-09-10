@@ -9,6 +9,8 @@ This directory records the held-out comparison produced from commit
 | `holdout/*.csv.gz` | Per-window July probabilities and both hard-prediction policies, split by model and horizon |
 | `thresholds.json` | Operational thresholds selected from pooled development predictions |
 | `metrics.csv` | 72 recomputed metric rows: 36 cells under the reference and development-selected thresholds |
+| `eventwise_metrics.csv` | Threshold-free ranking metrics for every model, horizon, seed and May/June/July event |
+| `eventwise_summary.csv` | Seed means and variation for the 36 event/model/horizon comparisons |
 | `run_context.json` | Dataset hash, row/window counts, sequence shape and execution device |
 | `validation.json` | Validation result produced before the bundle was exported |
 

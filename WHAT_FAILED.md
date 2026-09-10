@@ -29,6 +29,20 @@ The likely explanation is episode shift combined with too few independent events
 There are many overlapping windows but only four published air-leak intervals. Window
 count does not create new independent failure mechanisms.
 
+### The models learned different development episodes
+
+Event-wise replay makes that explanation concrete. At the one-hour horizon, TCN
+achieves `14.99×` AP lift on the May development failure but only `2.57×` on June and
+`0.75×` on July. Attention-TCN instead reaches `13.60×` on June, compared with `2.18×`
+on May and `0.78×` on July. XGBoost is weaker on the development episodes but fails
+least severely on July.
+
+This is not a clean progression from simple to complex. It is evidence of unstable,
+episode-specific ranking: each sequence model finds a strong pattern in a different
+development event, and neither pattern transfers to the held-out event. Three random
+seeds test optimization sensitivity, but they do not turn three episodes into a large
+sample of failure mechanisms.
+
 ## 3. Preserving within-hour order did not help
 
 The TCN sees ordered 30-second aggregates instead of 38 summary statistics. It should

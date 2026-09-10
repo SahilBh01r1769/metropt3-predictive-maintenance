@@ -49,6 +49,33 @@ Absolute AP rises with the horizon because the number of positive windows rises 
 2 at one hour to 24 at twelve hours. Lift is therefore the fairer cross-horizon view.
 The experiment does not support a claim that the twelve-hour task is learned better.
 
+## Event-to-event transfer
+
+The July collapse is not evidence that the sequence models learned nothing. Replaying
+the same threshold-free metrics separately for each failure shows that they learned
+different development episodes. The one-hour results make the contrast clearest:
+
+| Event | XGBoost AP lift | TCN AP lift | Attention-TCN AP lift |
+|---|---:|---:|---:|
+| May development failure | 1.00× | **14.99×** | 2.18× |
+| June development failure | 1.64× | 2.57× | **13.60×** |
+| July final holdout | **1.63×** | 0.75× | 0.78× |
+
+These are means over the same three seeds, but the three rows are only three failure
+episodes. TCN ranks the May precursor strongly; attention ranks the June precursor
+strongly; neither behavior transfers to July. That reversal is the central modeling
+result: added capacity fits episode-specific signals without establishing a shared
+warning signature.
+
+The event-wise tables are generated directly from the committed probability traces:
+
+```bash
+python scripts/analyze_temporal_results.py
+```
+
+They record AP, lift over prevalence, ROC-AUC and positive-versus-negative median score
+separation for every event, model, horizon and seed.
+
 ## Alert policy result
 
 The `0.5` reference threshold detects no held-out event for any model, horizon or seed.
