@@ -13,6 +13,8 @@ def test_experiment_notebook_is_valid_and_preserves_methodology():
     )
 
     assert "assert torch.cuda.is_available()" in source
+    assert "sys.path.insert(0, source_root)" in source
+    assert "find_spec('metropt3') is not None" in source
     assert "Dataset differs from audited source" in source
     assert "Expected 7,846 predictive windows" in source
     assert "run_experiment(dataset, output_root, config=config)" in source
