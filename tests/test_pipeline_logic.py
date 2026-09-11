@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from metropt3.features import build_windows
+from metropt3.features import _window_features, build_windows
+from metropt3.config import FAILURE_INTERVALS
 from metropt3.labels import add_failure_labels
 from metropt3.validation import validate_and_segment
 
@@ -72,3 +73,94 @@ def test_failure_horizon_label_before_known_failure():
     labeled = add_failure_labels(windows, horizon_hours=12)
     assert labeled["failure_within_horizon"].max() == 1
     assert not labeled["in_failure"].any()
+
+
+def test_window_overlapping_failure_end_is_marked_active():
+    _, failure_end, _ = FAILURE_INTERVALS[0]
+    failure_end = pd.Timestamp(failure_end)
+    windows = pd.DataFrame(
+        {
+            "window_start": [failure_end - pd.Timedelta(minutes=30)],
+            "window_end": [failure_end + pd.Timedelta(minutes=30)],
+        }
+    )
+
+    labeled = add_failure_labels(windows)
+
+    assert labeled.loc[0, "in_failure"]
+
+
+def test_window_ending_at_failure_start_is_predictive_not_active():
+    failure_start, _, _ = FAILURE_INTERVALS[0]
+    failure_start = pd.Timestamp(failure_start)
+    windows = pd.DataFrame(
+        {
+            "window_start": [failure_start - pd.Timedelta(hours=1)],
+            "window_end": [failure_start],
+        }
+    )
+
+    labeled = add_failure_labels(windows, horizon_hours=1)
+
+    assert not labeled.loc[0, "in_failure"]
+    assert labeled.loc[0, "failure_within_horizon"] == 1
+    assert labeled.loc[0, "hours_to_next_failure"] == 0.0
+
+
+def test_window_starting_at_failure_end_is_not_active():
+    _, failure_end, _ = FAILURE_INTERVALS[0]
+    failure_end = pd.Timestamp(failure_end)
+    windows = pd.DataFrame(
+        {
+            "window_start": [failure_end],
+            "window_end": [failure_end + pd.Timedelta(hours=1)],
+        }
+    )
+
+    labeled = add_failure_labels(windows)
+
+    assert not labeled.loc[0, "in_failure"]
+
+
+def test_rate_of_change_uses_elapsed_time_not_row_count():
+    base = {
+        "TP3": 8.8,
+        "H1": 8.0,
+        "DV_pressure": 0.1,
+        "Reservoirs": 8.7,
+        "Oil_temperature": 65.0,
+        "Motor_current": 5.0,
+        "COMP": 1,
+    }
+    dense = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                ["2020-01-01 00:00:00", "2020-01-01 00:10:00", "2020-01-01 00:30:00"]
+            ),
+            "TP2": [2.0, 4.0, 8.0],
+            **base,
+        }
+    )
+    sparse = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                ["2020-01-01 00:00:00", "2020-01-01 00:30:00"]
+            ),
+            "TP2": [2.0, 8.0],
+            **base,
+        }
+    )
+
+    dense_features = _window_features(dense)
+    sparse_features = _window_features(sparse)
+
+    assert dense_features["TP2_roc_per_hour"] == 12.0
+    assert sparse_features["TP2_roc_per_hour"] == 12.0
+
+
+def test_rate_of_change_rejects_zero_elapsed_time():
+    chunk = frame(seconds=2)
+    chunk.loc[1, "timestamp"] = chunk.loc[0, "timestamp"]
+
+    with np.testing.assert_raises_regex(ValueError, "increasing timestamps"):
+        _window_features(chunk)

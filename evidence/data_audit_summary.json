@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "audit_code_revision": "a83483be17474f7bcccc8766d332b24dc3ebad5b",
+  "dataset": {
+    "filename": "MetroPT3(AirCompressor).csv",
+    "bytes": 218300507,
+    "sha256": "db30ccb4ea402e3c8bf2c99db06e288d4f2a772f6928f9dbe26a920d69793e24",
+    "rows": 1516948,
+    "valid_rows": 1515830,
+    "quarantined_rows": 1118
+  },
+  "timestamp": {
+    "start": "2020-02-01T00:00:00",
+    "end": "2020-09-01T03:59:50",
+    "unparseable": 0,
+    "duplicate_timestamps": 0,
+    "non_increasing_adjacent_pairs": 0,
+    "median_delta_seconds": 10.0,
+    "p90_delta_seconds": 10.0,
+    "p99_delta_seconds": 12.0,
+    "p99_9_delta_seconds": 13.0
+  },
+  "continuity": {
+    "gap_policy_seconds": 30,
+    "segments": 334,
+    "segments_at_least_one_hour": 214
+  },
+  "windows": {
+    "history_seconds": 3600,
+    "step_seconds": 1800,
+    "complete_feature_windows": 8012,
+    "predictive_windows": 7846,
+    "active_failure_windows_quarantined": 166
+  },
+  "horizons": [
+    {
+      "hours": 1,
+      "positive_windows": 8,
+      "train_positive": 6,
+      "test_positive": 2,
+      "timestamp_intervals_disjoint": true
+    },
+    {
+      "hours": 3,
+      "positive_windows": 24,
+      "train_positive": 18,
+      "test_positive": 6,
+      "timestamp_intervals_disjoint": true
+    },
+    {
+      "hours": 6,
+      "positive_windows": 48,
+      "train_positive": 36,
+      "test_positive": 12,
+      "timestamp_intervals_disjoint": true
+    },
+    {
+      "hours": 12,
+      "positive_windows": 96,
+      "train_positive": 72,
+      "test_positive": 24,
+      "timestamp_intervals_disjoint": true
+    }
+  ],
+  "decision_use": "Freeze representation and training rules before model results"
+}

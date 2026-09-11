@@ -25,10 +25,17 @@ def add_failure_labels(
     predictive target by callers. This avoids training a pre-failure classifier on data
     captured after the failure has already begun.
     """
-    if "window_end" not in windows.columns:
-        raise ValueError("window_end is required")
+    required = {"window_start", "window_end"}
+    missing = required.difference(windows.columns)
+    if missing:
+        raise ValueError(f"{', '.join(sorted(missing))} is required")
+    if horizon_hours < 0:
+        raise ValueError("horizon_hours must be non-negative")
     out = windows.copy()
+    out["window_start"] = pd.to_datetime(out["window_start"])
     out["window_end"] = pd.to_datetime(out["window_end"])
+    if (out["window_end"] <= out["window_start"]).any():
+        raise ValueError("window_end must be after window_start")
     failures = failure_table()
     horizon = pd.Timedelta(hours=horizon_hours)
 
@@ -36,9 +43,11 @@ def add_failure_labels(
     in_failure: list[bool] = []
     hours_to_failure: list[float | None] = []
 
-    for end in out["window_end"]:
-        active = ((failures["failure_start"] <= end) & (end <= failures["failure_end"])).any()
-        future = failures[failures["failure_start"] > end].sort_values("failure_start")
+    for start, end in zip(out["window_start"], out["window_end"]):
+        active = (
+            (failures["failure_start"] < end) & (failures["failure_end"] > start)
+        ).any()
+        future = failures[failures["failure_start"] >= end].sort_values("failure_start")
         if future.empty:
             delta_h = None
             target = 0

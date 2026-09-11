@@ -1,82 +1,186 @@
-# Verified Baseline Results
+# Temporal representation experiment
 
-These results come from a clean GitHub Actions run on the official UCI MetroPT-3 archive. They are included to make the repository reproducible and to prevent unverified portfolio claims.
+The controlled comparison did not produce a useful failure predictor. It did produce
+a clear result: on the final July episode, increasing representation complexity from
+engineered summaries to ordered sequences and attention did not improve transfer.
 
-## Verification run
+![Held-out performance across horizons](figures/horizon_performance.png)
 
-- Workflow: `full data smoke`
-- Run ID: `33190420834`
-- Python: 3.11
-- Source: official UCI MetroPT-3 archive downloaded by `scripts/download_data.py`
-- Raw rows: **1,516,948**
-- Valid rows after validation: **1,515,830**
-- Quarantined rows: **1,118**
-- Duplicate timestamps: **0**
-- Gap-defined segments: **334**
-- Observed median segment cadences represented in accepted windows: **10 s and 12 s**
-- Segment-safe feature windows: **8,012**
-- Model input features: **38**
+## Experimental question
 
-The same run also verified that the trained artifact can be loaded and that the Streamlit dashboard starts successfully with it present.
+Can one hour of compressor history rank windows preceding an unseen air-leak episode
+above ordinary operating windows, and does preserving within-hour order help?
 
-## Baseline model
+Only the representation and model change:
 
-The current baseline is a class-balanced Random Forest evaluated with the repository's final-event chronological holdout policy.
+1. **XGBoost** receives 38 engineered one-hour summary features.
+2. **TCN** receives 120 ordered 30-second steps across nine channels.
+3. **Attention-TCN** uses the same causal TCN encoder and adds attention pooling.
 
-| Metric | Verified value |
-|---|---:|
-| Balanced accuracy | 0.5000 |
-| Precision | 0.0000 |
-| Recall | 0.0000 |
-| F1 | 0.0000 |
-| ROC-AUC | 0.4862 |
-| Average precision | 0.0111 |
-| Training windows | 5,818 |
-| Test windows | 2,034 |
-| Positive training windows | 72 |
-| Positive test windows | 24 |
+All models use the same 7,846 predictive windows, 1/3/6/12-hour targets, fixed July
+holdout, three seeds and training-only preprocessing. Early stopping and operational
+thresholds use two earlier chronological development folds. July is never used for
+tuning.
 
-## Interpretation
+## Primary result: probability ranking
 
-This baseline **does not demonstrate useful predictive performance** on the held-out final failure episode. Its ROC-AUC is approximately random and it did not identify the positive test windows at the default classifier threshold.
+Average precision (AP) is averaged over seeds 17, 42 and 89. Lift divides AP by the
+positive prevalence for that horizon; `1.0×` is random-ranking performance.
 
-That negative result is intentionally preserved rather than replaced with an easier random split or an unverified historical metric. It shows that:
+| Model | Horizon | AP, mean ± SD | AP lift | ROC-AUC |
+|---|---:|---:|---:|---:|
+| XGBoost | 1 h | 0.001604 ± 0.000433 | **1.63×** | 0.420 |
+| XGBoost | 3 h | 0.002958 ± 0.000006 | 1.00× | 0.438 |
+| XGBoost | 6 h | 0.005819 ± 0.000150 | 0.99× | 0.438 |
+| XGBoost | 12 h | 0.012286 ± 0.001744 | 1.04× | 0.456 |
+| TCN | 1 h | 0.000742 ± 0.000001 | 0.75× | 0.005 |
+| TCN | 3 h | 0.001736 ± 0.000013 | 0.59× | 0.012 |
+| TCN | 6 h | 0.003843 ± 0.000876 | 0.65× | 0.155 |
+| TCN | 12 h | 0.007008 ± 0.000616 | 0.59× | 0.180 |
+| Attention-TCN | 1 h | 0.000767 ± 0.000047 | 0.78× | 0.040 |
+| Attention-TCN | 3 h | 0.001745 ± 0.000020 | 0.59× | 0.016 |
+| Attention-TCN | 6 h | 0.003226 ± 0.000011 | 0.55× | 0.008 |
+| Attention-TCN | 12 h | 0.006306 ± 0.000044 | 0.53× | 0.025 |
 
-1. the 12-hour pre-failure target is extremely imbalanced,
-2. one-hour statistical windows plus the current hand-engineered features are not sufficient for this holdout,
-3. predictive-maintenance evaluation must be event-aware and chronological, and
-4. better performance will require model/target/feature research rather than presentation changes.
+XGBoost ranks best at every horizon, but only its one-hour result rises materially
+above prevalence. Its ROC-AUC remains below 0.5 at every horizon. Both sequence models
+rank the July positives below most negative windows; attention does not repair that
+failure.
 
-## What is verified versus not claimed
+Absolute AP rises with the horizon because the number of positive windows rises from
+2 at one hour to 24 at twelve hours. Lift is therefore the fairer cross-horizon view.
+The experiment does not support a claim that the twelve-hour task is learned better.
 
-Verified:
+## Event-to-event transfer
 
-- official UCI download works from a clean environment,
-- validation and quarantine run on the full CSV,
-- windows do not cross configured segment boundaries,
-- coverage adapts to observed timestamp cadence,
-- published failure intervals produce future-horizon labels,
-- model artifacts and metrics are generated reproducibly,
-- evaluation contains both positive and negative examples,
-- the Streamlit dashboard starts with the trained artifact.
+The July collapse is not evidence that the sequence models learned nothing. Replaying
+the same threshold-free metrics separately for each failure shows that they learned
+different development episodes. The one-hour results make the contrast clearest:
 
-Not claimed:
+| Event | XGBoost AP lift | TCN AP lift | Attention-TCN AP lift |
+|---|---:|---:|---:|
+| May development failure | 1.00× | **14.99×** | 2.18× |
+| June development failure | 1.64× | 2.57× | **13.60×** |
+| July final holdout | **1.63×** | 0.75× | 0.78× |
 
-- production-ready failure prediction,
-- continuous Remaining Useful Life ground truth,
-- an LSTM/BiLSTM result,
-- historical RMSE/MAE values from prior experiments,
-- a percentage improvement over another model.
+These are means over the same three seeds, but the three rows are only three failure
+episodes. TCN ranks the May precursor strongly; attention ranks the June precursor
+strongly; neither behavior transfers to July. That reversal is the central modeling
+result: added capacity fits episode-specific signals without establishing a shared
+warning signature.
 
-## Next modeling experiments
+The event-wise tables are generated directly from the committed probability traces:
 
-A credible next research phase would compare, under the same event-aware evaluation policy:
+```bash
+python scripts/analyze_temporal_results.py
+```
 
-- multiple prediction horizons (for example 6 h, 24 h, 48 h),
-- rolling-origin evaluation across individual failure episodes,
-- stronger temporal features and lag/trend features,
-- calibrated tree/boosting baselines,
-- sequence models only after the tabular baselines and leakage checks are established,
-- threshold selection based on maintenance costs rather than a fixed 0.5 cutoff.
+They record AP, lift over prevalence, ROC-AUC and positive-versus-negative median score
+separation for every event, model, horizon and seed.
 
-Any future metric should be added here only after it is reproduced on a clean run.
+![Cross-event transfer](figures/cross_event_transfer.png)
+
+## Sensor-regime diagnostic
+
+The committed event-regime extraction compares the median of each engineered feature
+in the 24 hours before May, June and July failure onset with a clean normal-window
+baseline. The effect is standardized by the normal-window interquartile range; it is
+descriptive, not a new predictor or a significance test.
+
+![Sensor-regime shifts](figures/event_regime_shift.png)
+
+Several directions are shared, but the magnitudes are not. For example:
+
+| Feature | May | June | July |
+|---|---:|---:|---:|
+| `TP2_mean` | +0.27 | +0.09 | **+4.50** |
+| `pressure_diff_mean` | −0.50 | −0.12 | **−5.03** |
+| `H1_mean` | −0.46 | −0.13 | **−4.91** |
+| `Oil_temperature_mean` | +0.43 | +0.10 | **+1.15** |
+| `Motor_current_max` | −0.62 | −0.38 | −0.27 |
+
+This supports a narrower episode-shift explanation: some broad sensor directions recur,
+but July occupies a materially different regime and the effect size is not stable.
+The comparison contains only three failure episodes, so it cannot establish a universal
+precursor signature. Near-constant features are retained in the CSV but should not be
+interpreted from a large standardized value alone.
+
+The diagnostic bundle does not change the frozen model metrics. The returned importance
+CSV still has the old two-column shape and all-zero values, so it is not retained as
+feature-importance evidence: its key provenance cannot be established after the fact.
+The current extractor maps both named and positional XGBoost keys and records the
+mapping source for every feature. A future run can therefore distinguish a genuine
+no-split model from an unused feature; no importance claim is made here.
+
+## Alert policy result
+
+The `0.5` reference threshold detects no held-out event for any model, horizon or seed.
+The following table uses thresholds selected only from pooled development predictions.
+“Detected” is the number of seeds with at least one true-positive July alert.
+
+| Model | Horizon | Threshold | Detected | False-alert episodes/day | First-alert lead time |
+|---|---:|---:|---:|---:|---:|
+| XGBoost | 1 h | 0.30 | 1/3 | 3.44 | 0.53 h |
+| XGBoost | 3 h | 0.38 | 3/3 | 1.49 | 2.53 h |
+| XGBoost | 6 h | 0.36 | 3/3 | 1.49 | 5.53 h |
+| XGBoost | 12 h | 0.35 | 3/3 | 1.49 | 11.53 h |
+| TCN | 1 h | 0.95 | 0/3 | 0.00 | — |
+| TCN | 3 h | 0.08 | 0/3 | 0.88 | — |
+| TCN | 6 h | 0.87 | 0/3 | 0.01 | — |
+| TCN | 12 h | 0.05 | 3/3 | 2.24 | 11.53 h |
+| Attention-TCN | 1 h | 0.06 | 0/3 | 0.00 | — |
+| Attention-TCN | 3 h | 0.05 | 0/3 | 1.83 | — |
+| Attention-TCN | 6 h | 0.05 | 1/3 | 2.53 | 5.53 h |
+| Attention-TCN | 12 h | 0.06 | 2/3 | 1.02 | 11.53 h |
+
+These detections are not evidence of a deployable alert policy. At 3/6/12 hours,
+XGBoost's mean recall is 1.0 but its precision is only 0.003/0.006/0.012 and balanced
+accuracy is 0.5. The development threshold has become permissive enough to flag the
+event while also flagging many ordinary periods. TCN's twelve-hour detection has the
+same problem: mean precision is 0.0085 with 2.24 false-alert episodes per evaluated
+day.
+
+![Threshold choice and false-alert burden](figures/threshold_alert_burden.png)
+
+## Cost of representation complexity
+
+Measurements below are means across all horizons and seeds from the same Tesla T4
+session. Timing is execution evidence, not a cross-machine benchmark.
+
+| Model | Mean development fit | Mean final fit | Mean prediction | Stored artifact | Parameters |
+|---|---:|---:|---:|---:|---:|
+| XGBoost | 0.21 s | 0.06 s | 0.006 s | 17.6 KB | tree-dependent |
+| TCN | 29.26 s | 8.31 s | 0.018 s | 126.9 KB | 29,185 |
+| Attention-TCN | 25.13 s | 5.51 s | 0.018 s | 132.6 KB | 30,274 |
+
+The sequence models cost roughly two orders of magnitude more fit time than XGBoost
+without improving held-out ranking. Attention adds 1,089 parameters and also fails to
+improve ranking over the shared TCN encoder.
+
+![Fit cost versus held-out ranking](figures/fit_cost_vs_ranking.png)
+
+## Event-centered scores
+
+The probability traces show the ranking failure directly rather than reducing it to a
+single score. Development models produce episode-specific score structure before May
+and June, while the July precursor remains below or indistinguishable from ordinary
+windows for the sequence models.
+
+![Event-centered probability timelines](figures/event_probability_timelines.png)
+
+## What this experiment establishes
+
+- The corrected pipeline runs end to end over the audited 1.5-million-row dataset.
+- Raw training and holdout timestamps are explicitly disjoint.
+- Per-window probabilities expose failures that summary scores previously hid.
+- XGBoost is the strongest of the three representations, but its advantage is weak.
+- More expressive temporal models do not compensate for very few independent failure
+  episodes or a non-transferable representation.
+- A threshold can create apparent event detection without useful ranking or acceptable
+  alert precision.
+
+This is evidence from one held-out failure episode. It is a case study of transfer to
+July, not an estimate of performance across compressors or failure types.
+
+The complete 72 metric rows and the exported prediction traces are in
+[`evidence/temporal_experiment`](evidence/temporal_experiment/README.md).

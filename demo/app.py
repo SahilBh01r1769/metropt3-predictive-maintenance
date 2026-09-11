@@ -3,262 +3,243 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import joblib
-import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 
-from metropt3.config import ANALOGUE_COLS, ARTIFACT_DIR
-from metropt3.features import build_windows
-from metropt3.modeling import predict_risk
-from metropt3.validation import range_diagnostics, validate_and_segment
+from metropt3.explorer import (
+    EVENT_LABELS,
+    MODEL_LABELS,
+    event_failure_time,
+    load_explorer_evidence,
+    load_probability_trace,
+    summarize_metric_rows,
+    threshold_for,
+)
 
-st.set_page_config(page_title="MetroPT-3 Maintenance Dashboard", layout="wide")
+EVIDENCE_ROOT = ROOT / "evidence" / "temporal_experiment"
+CONFIG_PATH = ROOT / "configs" / "temporal_experiment.json"
 
-st.markdown(
-    """
-<style>
-:root {
-  --page: #f1eee8;
-  --panel: #e6e0d6;
-  --panel-2: #ddd6cb;
-  --ink: #29251f;
-  --muted: #6c655c;
-  --line: #bdb4a8;
-  --rust: #82503a;
-  --slate: #50616d;
-}
-html, body, [data-testid="stAppViewContainer"] {
-  background: var(--page);
-  color: var(--ink);
-  font-family: Arial, Helvetica, sans-serif;
-}
-[data-testid="stSidebar"] {
-  background: #e4ded4;
-  border-right: 1px solid var(--line);
-}
-.block-container { max-width: 1320px; padding-top: 2rem; }
-h1, h2, h3 { color: var(--ink) !important; letter-spacing: -0.02em; }
-.hero {
-  padding: 1.25rem 0 1rem;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 1.25rem;
-}
-.hero h1 { margin: 0; font-size: 2.1rem; }
-.hero p { margin: .45rem 0 0; color: var(--muted); max-width: 760px; }
-.context-line {
-  margin-top: .75rem;
-  color: var(--muted);
-  font-size: .8rem;
-  letter-spacing: .02em;
-}
-.risk-card {
-  padding: 1.1rem 1.2rem;
-  border-radius: 3px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-}
-.small-note { color: var(--muted); font-size: .82rem; }
-[data-testid="stMetric"] {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 11px;
-  box-shadow: none;
-}
-.stButton > button,
-[data-baseweb="select"] > div,
-[data-testid="stFileUploaderDropzone"] {
-  border-radius: 3px !important;
-  box-shadow: none !important;
-}
-.skeleton {
-  height: 112px;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  margin: 8px 0 16px;
-  animation: skeletonPulse 1.05s ease-in-out infinite;
-}
-@keyframes skeletonPulse { 0%,100% { opacity: .45; } 50% { opacity: .78; } }
-</style>
-<div class="hero">
-  <h1>MetroPT-3 Predictive Maintenance</h1>
-  <p>Explore air-compressor sensor health, segment-safe feature windows and maintenance risk signals.</p>
-  <div class="context-line">SENSOR TELEMETRY / GAP-SAFE SEGMENTATION / FAILURE-HORIZON MODELING</div>
-</div>
-""",
-    unsafe_allow_html=True,
+st.set_page_config(page_title="MetroPT-3 Experiment Explorer", layout="wide")
+st.title("MetroPT-3 temporal representation study")
+st.caption(
+    "Explore the committed evidence behind the XGBoost → TCN → Attention-TCN comparison. "
+    "This is an experiment viewer, not a live maintenance product."
 )
 
 
-def loading_placeholder():
-    slot = st.empty()
-    slot.markdown('<div class="skeleton"></div>', unsafe_allow_html=True)
-    return slot
+@st.cache_data
+def load_data():
+    return load_explorer_evidence(EVIDENCE_ROOT)
 
 
-def synthetic_frame(kind: str, seconds: int = 7200) -> pd.DataFrame:
-    rng = np.random.default_rng(42 if kind == "Healthy reference" else 7)
-    t = np.arange(seconds)
-    ts = pd.date_range("2020-03-20 08:00:00", periods=seconds, freq="s")
-    degrading = kind == "Degradation scenario"
-    ramp = np.linspace(0, 1, seconds) if degrading else np.zeros(seconds)
-    comp = ((t // 90) % 2).astype(int)
-    return pd.DataFrame(
-        {
-            "timestamp": ts,
-            "TP2": 1.3 + comp * 7.8 + rng.normal(0, 0.10, seconds) + 0.5 * ramp,
-            "TP3": 8.7 + rng.normal(0, 0.08, seconds) - 0.7 * ramp,
-            "H1": 8.1 + rng.normal(0, 0.09, seconds) - 0.5 * ramp,
-            "DV_pressure": 0.05 + rng.normal(0, 0.025, seconds) + 0.7 * ramp,
-            "Reservoirs": 8.6 + rng.normal(0, 0.07, seconds) - 0.5 * ramp,
-            "Oil_temperature": 62 + rng.normal(0, 0.45, seconds) + 18 * ramp,
-            "Motor_current": 3 + comp * 5.5 + rng.normal(0, 0.35, seconds) + 2.4 * ramp,
-            "COMP": comp,
-        }
-    )
-
-
-def heuristic_risk(latest: pd.Series) -> float:
-    """Transparent demo-only indicator; this is not the trained ML model."""
-    signals = [
-        np.clip((latest.get("Oil_temperature_mean", 60) - 65) / 35, 0, 1),
-        np.clip((latest.get("Motor_current_mean", 5) - 6) / 8, 0, 1),
-        np.clip(latest.get("DV_pressure_mean", 0) / 1.5, 0, 1),
-        np.clip(abs(latest.get("pressure_diff_mean", 7.5) - 7.5) / 5, 0, 1),
-        np.clip(latest.get("motor_current_volatility", 0) / 3, 0, 1),
-    ]
-    return float(np.mean(signals))
-
+try:
+    metrics, eventwise, thresholds = load_data()
+except (FileNotFoundError, ValueError) as exc:
+    st.error(f"Committed experiment evidence could not be loaded: {exc}")
+    st.stop()
 
 with st.sidebar:
-    st.header("Data source")
-    mode = st.radio("Choose input", ["Healthy reference", "Degradation scenario", "Upload MetroPT-style CSV"])
-    st.caption("Built-in scenarios are synthetic and exist only to demonstrate the dashboard workflow.")
-    uploaded = None
-    if mode == "Upload MetroPT-style CSV":
-        uploaded = st.file_uploader("CSV file", type=["csv"])
+    st.header("Evidence controls")
+    model = st.selectbox("Model", list(MODEL_LABELS), format_func=MODEL_LABELS.get)
+    horizon = st.selectbox(
+        "Prediction horizon", [1, 3, 6, 12], format_func=lambda value: f"{value} h"
+    )
+    event = st.selectbox(
+        "Failure episode", list(EVENT_LABELS), format_func=EVENT_LABELS.get
+    )
+    threshold_policy = st.radio(
+        "Threshold mode",
+        ["reference_0.5", "development_selected"],
+        format_func={
+            "reference_0.5": "0.5 reference",
+            "development_selected": "Development-selected",
+        }.get,
+    )
     st.divider()
-    st.subheader("Windowing")
-    window_minutes = st.slider("Window length", 10, 60, 60, 10)
-    step_minutes = st.slider("Step", 5, 30, 30, 5)
+    st.caption("All values are loaded from versioned prediction traces and metric tables.")
 
-if mode == "Upload MetroPT-style CSV":
-    if uploaded is None:
-        st.info("Upload a MetroPT-style CSV to begin, or select a built-in reference scenario.")
-        st.stop()
-    raw = pd.read_csv(uploaded)
-else:
-    raw = synthetic_frame(mode)
-
-loading = loading_placeholder()
-try:
-    valid, report = validate_and_segment(raw)
-    windows = build_windows(
-        valid,
-        window_seconds=window_minutes * 60,
-        step_seconds=step_minutes * 60,
-        min_coverage=0.7,
-    )
-except Exception as exc:
-    loading.empty()
-    st.error(f"Input validation failed: {exc}")
-    st.stop()
-loading.empty()
-
-q1, q2, q3, q4 = st.columns(4)
-q1.metric("Valid rows", f"{report.valid_rows:,}")
-q2.metric("Quarantined", f"{report.quarantined_rows:,}")
-q3.metric("Continuous segments", report.segments)
-q4.metric("Feature windows", f"{len(windows):,}")
-
-if windows.empty:
-    st.warning("No complete feature windows could be built from this input.")
-    st.stop()
-
-latest = windows.iloc[-1]
-model_path = ARTIFACT_DIR / "model.joblib"
-model_loading = loading_placeholder()
-if model_path.exists():
-    bundle = joblib.load(model_path)
-    risk = float(predict_risk(bundle, windows.tail(1))[0])
-    risk_label = "Trained model probability"
-    risk_note = "Generated by artifacts/model.joblib from the reproducible training pipeline."
-else:
-    risk = heuristic_risk(latest)
-    risk_label = "Demo health-risk indicator"
-    risk_note = "Heuristic visualization only, not an ML prediction. Train the repository pipeline to generate a model artifact."
-model_loading.empty()
-
-if risk >= 0.67:
-    status = "HIGH ATTENTION"
-elif risk >= 0.34:
-    status = "WATCH"
-else:
-    status = "STABLE"
-
-left, right = st.columns([1, 2])
-with left:
-    st.markdown(
-        f"""<div class="risk-card"><div class="small-note">{risk_label}</div>
-        <h2 style="margin:.35rem 0">{status}</h2><div style="font-size:2.1rem;font-weight:700">{risk:.0%}</div>
-        <p class="small-note">{risk_note}</p></div>""",
-        unsafe_allow_html=True,
-    )
-    st.markdown("#### Latest engineered window")
-    st.metric("Oil temperature mean", f"{latest['Oil_temperature_mean']:.1f} °C")
-    st.metric("Motor current mean", f"{latest['Motor_current_mean']:.2f} A")
-    st.metric("Compressor duty cycle", f"{latest['comp_duty_cycle']:.0%}")
-    st.metric("Pressure differential", f"{latest['pressure_diff_mean']:.2f} bar")
-
-with right:
-    st.markdown("#### Sensor telemetry")
-    sensor = st.selectbox("Sensor", ANALOGUE_COLS, index=5)
-    plot_df = valid[["timestamp", sensor, "segment_id"]].copy()
-    fig = px.line(
-        plot_df,
-        x="timestamp",
-        y=sensor,
-        line_group="segment_id",
-        labels={"timestamp": "Time"},
-        color_discrete_sequence=["#50616d"],
-    )
-    fig.update_traces(line={"color": "#50616d", "width": 1.4})
-    fig.update_layout(height=430, showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
-    st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("#### Window-level condition trends")
-trend_cols = ["Oil_temperature_mean", "Motor_current_mean", "DV_pressure_mean", "pressure_diff_mean"]
-trend = windows[["window_end", *trend_cols]].melt("window_end", var_name="feature", value_name="value")
-fig2 = px.line(
-    trend,
-    x="window_end",
-    y="value",
-    facet_row="feature",
-    color="feature",
-    color_discrete_sequence=["#82503a", "#50616d", "#5f6d59", "#756552"],
+overview, transfer, timeline, operations = st.tabs(
+    ["Experiment overview", "Cross-event transfer", "Probability timeline", "Operational view"]
 )
-fig2.update_layout(height=650, showlegend=False, margin=dict(l=10, r=10, t=20, b=10))
-st.plotly_chart(fig2, use_container_width=True)
 
-with st.expander("Data quality and range diagnostics"):
-    st.dataframe(range_diagnostics(valid), use_container_width=True, hide_index=True)
-    st.caption("Percentiles help tune sanity bounds from observed operating data; they are not failure thresholds.")
+with overview:
+    selected = summarize_metric_rows(metrics, model=model, horizon_hours=horizon)
+    reference = selected.loc[selected["threshold_policy"].eq("reference_0.5")].iloc[0]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Average precision", f"{reference['average_precision']:.4f}")
+    c2.metric("AP lift / prevalence", f"{reference['ap_lift_over_prevalence']:.2f}×")
+    c3.metric("ROC-AUC", f"{reference['roc_auc']:.3f}")
+    c4.metric("Positive prevalence", f"{reference['prevalence']:.3%}")
 
-with st.expander("How the production pipeline differs from this demo"):
+    july = eventwise.loc[eventwise["event"].eq("july_holdout")].copy()
+    july["model_label"] = july["model"].map(MODEL_LABELS)
+    fig = px.line(
+        july,
+        x="horizon_hours",
+        y="ap_lift_mean",
+        color="model_label",
+        markers=True,
+        labels={
+            "horizon_hours": "Prediction horizon (hours)",
+            "ap_lift_mean": "AP lift over prevalence",
+            "model_label": "Model",
+        },
+        title="Held-out July ranking across horizons",
+    )
+    fig.add_hline(y=1, line_dash="dash", annotation_text="prevalence baseline")
+    fig.update_xaxes(tickvals=[1, 3, 6, 12])
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(
+        "Absolute AP rises as longer horizons create more positive windows. AP lift divides by "
+        "prevalence, making the four horizon tasks more comparable."
+    )
+
+with transfer:
+    event_frame = eventwise.loc[eventwise["horizon_hours"].eq(horizon)].copy()
+    event_frame["event_label"] = event_frame["event"].map(EVENT_LABELS)
+    event_frame["model_label"] = event_frame["model"].map(MODEL_LABELS)
+    fig = px.bar(
+        event_frame,
+        x="event_label",
+        y="ap_lift_mean",
+        color="model_label",
+        barmode="group",
+        error_y="ap_lift_std",
+        labels={
+            "event_label": "Failure episode",
+            "ap_lift_mean": "AP lift over prevalence",
+            "model_label": "Model",
+        },
+        title=f"Cross-event transfer at the {horizon}-hour horizon",
+    )
+    fig.add_hline(y=1, line_dash="dash", annotation_text="prevalence baseline")
+    st.plotly_chart(fig, use_container_width=True)
     st.markdown(
-        """
-- The repository training pipeline labels windows from the published MetroPT-3 failure intervals.
-- Active-failure windows are excluded from the pre-failure target.
-- Evaluation is chronological rather than random to reduce temporal leakage.
-- A trained `artifacts/model.joblib` is produced only after running on the real dataset.
-- This public dashboard can visualize uploaded data without presenting a synthetic demonstration as production-ready.
-"""
+        "The development episodes do not identify one consistently superior temporal model. "
+        "At one hour, TCN ranks May strongly and Attention-TCN ranks June strongly; neither "
+        "ranking transfers to July. XGBoost is weaker on development episodes but fails least "
+        "severely on the held-out event."
+    )
+
+with timeline:
+    trace = load_probability_trace(
+        EVIDENCE_ROOT, model=model, horizon_hours=horizon, event=event
+    )
+    failure_time = event_failure_time(CONFIG_PATH, event)
+    trace = trace.loc[
+        trace["window_end"].between(failure_time - pd.Timedelta(hours=48), failure_time)
+    ]
+    aggregated = (
+        trace.groupby("window_end", as_index=False)
+        .agg(
+            probability=("probability", "mean"),
+            probability_min=("probability", "min"),
+            probability_max=("probability", "max"),
+        )
+    )
+    chosen_threshold = threshold_for(
+        thresholds,
+        model=model,
+        horizon_hours=horizon,
+        policy=threshold_policy,
+    )
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=pd.concat([aggregated["window_end"], aggregated["window_end"].iloc[::-1]]),
+            y=pd.concat(
+                [aggregated["probability_max"], aggregated["probability_min"].iloc[::-1]]
+            ),
+            fill="toself",
+            fillcolor="rgba(80, 104, 138, 0.16)",
+            line={"color": "rgba(0,0,0,0)"},
+            hoverinfo="skip",
+            name="Seed range",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=aggregated["window_end"],
+            y=aggregated["probability"],
+            mode="lines",
+            name="Mean probability",
+            line={"color": "#50688a"},
+        )
+    )
+    fig.add_hline(
+        y=chosen_threshold,
+        line_dash="dot",
+        annotation_text=f"threshold {chosen_threshold:.2f}",
+    )
+    fig.add_vline(
+        x=failure_time.timestamp() * 1000,
+        line_dash="dash",
+        annotation_text="failure starts",
+    )
+    fig.update_layout(
+        title=f"{MODEL_LABELS[model]} before the {EVENT_LABELS[event]} failure",
+        xaxis_title="Window end",
+        yaxis_title="Predicted probability",
+        yaxis_range=[0, 1],
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "The line is the mean over three seeds; the shaded region is their minimum-to-maximum range."
+    )
+
+with operations:
+    selected = summarize_metric_rows(metrics, model=model, horizon_hours=horizon)
+    chosen = selected.loc[selected["threshold_policy"].eq(threshold_policy)].iloc[0]
+    threshold = threshold_for(
+        thresholds,
+        model=model,
+        horizon_hours=horizon,
+        policy=threshold_policy,
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Threshold", f"{threshold:.2f}")
+    c2.metric("Seeds detecting July", f"{chosen['event_detection_rate']:.0%}")
+    c3.metric("False alerts / day", f"{chosen['false_alert_episodes_per_day']:.2f}")
+    lead = chosen["first_alert_lead_hours"]
+    c4.metric("Mean first-warning lead", "—" if pd.isna(lead) else f"{lead:.2f} h")
+
+    comparison = selected.copy()
+    comparison["Threshold policy"] = comparison["threshold_policy"].map(
+        {
+            "reference_0.5": "0.5 reference",
+            "development_selected": "Development-selected",
+        }
+    )
+    display = comparison[
+        [
+            "Threshold policy",
+            "threshold",
+            "precision",
+            "recall",
+            "balanced_accuracy",
+            "false_alert_episodes_per_day",
+            "event_detection_rate",
+            "first_alert_lead_hours",
+        ]
+    ]
+    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.warning(
+        "A detected event is not sufficient evidence of a useful policy. The development-selected "
+        "thresholds sometimes recover July only by accepting low precision and frequent false alerts."
+    )
+
+if model == "attention_tcn":
+    st.divider()
+    st.subheader("Attention interpretation boundary")
+    st.caption(
+        "Attention weights indicate where the model focused within the observed sequence. "
+        "They are not causal explanations of compressor failure. Raw attention arrays were "
+        "validated in the original export but are not part of the compact committed evidence, "
+        "so this explorer does not manufacture an attention visualization."
     )

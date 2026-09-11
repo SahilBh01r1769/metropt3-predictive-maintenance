@@ -1,0 +1,9 @@
+{
+  "validated_rows": 1515830,
+  "segments": 334,
+  "windows": 8012,
+  "event_regime_effects": "evidence/event_regime/event_regime_effects.csv",
+  "event_regime_summary": "evidence/event_regime/event_regime_summary.csv",
+  "xgboost_gain_importance": "evidence/event_regime/xgboost_gain_importance.csv",
+  "interpretation": "descriptive analysis only; does not alter frozen model evidence"
+}
