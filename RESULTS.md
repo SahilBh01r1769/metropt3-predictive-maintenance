@@ -1,8 +1,8 @@
 # Results
 
-These are the numbers from the final XGBoost / TCN / Attention-TCN comparison.
+Final results for the XGBoost / TCN / Attention-TCN comparison.
 
-I use average precision (AP) as the main ranking metric because the positive class is very small. AP lift is simply `AP / positive prevalence`, so `1.0×` is roughly random-ranking performance for that horizon.
+Average precision (AP) is the main ranking metric because the positive class is very small. AP lift is `AP / positive prevalence`, so `1.0×` is approximately random-ranking performance for a given horizon.
 
 ## July holdout
 
@@ -23,15 +23,13 @@ I use average precision (AP) as the main ranking metric because the positive cla
 
 ![Held-out performance across horizons](figures/horizon_performance.png)
 
-XGBoost is the best of the three on July at every horizon, but that should not be read as a strong model result. Its ROC-AUC is still below 0.5 throughout, and only the one-hour AP is clearly above prevalence.
+XGBoost ranks best of the three on July at every horizon, but the held-out result is still weak. ROC-AUC remains below 0.5 throughout, and only the one-hour AP is clearly above prevalence.
 
-The sequence models are worse: on July they generally assign lower scores to pre-failure windows than to ordinary windows.
-
-Absolute AP increases at longer horizons because there are more positive windows. That is why I use AP lift when comparing 1h vs 12h rather than comparing AP alone.
+The sequence models rank the July pre-failure windows below most ordinary windows. Absolute AP rises at longer horizons because there are more positive windows, so AP lift is the more useful cross-horizon comparison.
 
 ## May vs June vs July
 
-The event-by-event replay is the part I found most useful:
+The event-by-event replay shows a different pattern:
 
 | Event | XGBoost AP lift | TCN AP lift | Attention-TCN AP lift |
 |---|---:|---:|---:|
@@ -41,15 +39,13 @@ The event-by-event replay is the part I found most useful:
 
 ![Cross-event transfer](figures/cross_event_transfer.png)
 
-TCN looks very strong around May. Attention-TCN looks very strong around June. Neither pattern repeats in July.
+TCN ranks the May precursor strongly, while Attention-TCN ranks June strongly. Neither pattern repeats in July.
 
-I do not think this means the neural networks simply failed to train. They found real score structure on the development episodes; the problem is that the useful structure changes from one failure to another.
+This suggests that the sequence models learned episode-specific score structure rather than one warning pattern that transfers consistently across failures. That result is also why the project stops at these three models instead of adding another deep architecture.
 
-That is also why adding another deep architecture did not seem like the right next step.
+## Sensor-regime diagnostic
 
-## Sensor check after the model run
-
-I compared engineered feature values from the 24 hours before each failure with clean normal-operation windows. The values below are standardized by the normal-window interquartile range.
+Engineered feature values from the 24 hours before each failure were compared with clean normal-operation windows. Values below are standardized by the normal-window interquartile range.
 
 | Feature | May | June | July |
 |---|---:|---:|---:|
@@ -61,11 +57,11 @@ I compared engineered feature values from the 24 hours before each failure with 
 
 ![Sensor-regime shifts](figures/event_regime_shift.png)
 
-There are a few repeated directions, but July is much more extreme on several pressure-related features. With only three evaluated failure episodes, I would not call that a universal precursor. It is better read as evidence that the operating/failure regime is not stable across events.
+Some directions repeat, but July is much more extreme on several pressure-related features. With only three evaluated failure episodes, this is not enough to define a universal precursor; it is more useful as evidence that the operating/failure regime changes between events.
 
 The full diagnostic tables are in `evidence/event_regime/`.
 
-I originally attempted to recover XGBoost feature importance from an exported CSV, but the old file had all-zero values and unclear key mapping. I chose not to report it as evidence. The current extraction code records the mapping correctly for future runs.
+An older exported XGBoost feature-importance CSV contained all-zero values with unclear key mapping, so it is not used as evidence here. The current extraction code records the mapping source correctly for future runs.
 
 ## Thresholds and alerts
 
@@ -90,11 +86,11 @@ The table below uses thresholds chosen only from May/June development prediction
 
 ![Threshold choice and false-alert burden](figures/threshold_alert_burden.png)
 
-This is a good example of why “detected the failure” is not enough. XGBoost detects July at 3h/6h/12h after lowering the threshold, but precision remains very low and the false-alert rate is high.
+Lowering the threshold can make the July event detectable, but the cost is very low precision and frequent false alerts. Event detection therefore has to be read together with alert burden rather than on its own.
 
 ## Runtime
 
-These timings came from the same Tesla T4 session. They are useful for relative cost inside this run, not as general hardware benchmarks.
+These timings come from the same Tesla T4 session. They are useful for relative cost within this run, not as general hardware benchmarks.
 
 | Model | Mean development fit | Mean final fit | Mean prediction | Stored artifact | Parameters |
 |---|---:|---:|---:|---:|---:|
@@ -104,27 +100,25 @@ These timings came from the same Tesla T4 session. They are useful for relative 
 
 ![Fit cost versus held-out ranking](figures/fit_cost_vs_ranking.png)
 
-The TCN models cost much more to fit and did not improve the held-out ranking. Attention adds 1,089 parameters over the TCN and did not rescue the result.
+The TCN models are much more expensive to fit and do not improve the held-out ranking. Attention adds 1,089 parameters over the TCN without improving the July result.
 
 ## Probability traces
 
-The saved per-window predictions make the event behavior easier to see than a single score:
+The saved per-window predictions make the event behavior easier to inspect than a single summary score:
 
 ![Event-centered probability timelines](figures/event_probability_timelines.png)
 
-The development events show clear model-specific score structure. July does not reproduce it for the sequence models.
+The development events show clear model-specific score structure. The July precursor does not reproduce that structure for the sequence models.
 
-## My read of the result
+## Interpretation
 
-The strongest conclusion is not “XGBoost solves MetroPT-3.” It does not.
+The main findings are:
 
-What I think this experiment shows is:
-
-- overlapping time windows can make the dataset look much larger than the number of genuinely independent failures;
+- overlapping time windows make the dataset look much larger than the number of genuinely independent failure episodes;
 - preserving more temporal detail does not automatically improve transfer;
-- the TCN and Attention-TCN can fit different failure episodes strongly without learning one repeatable warning pattern;
-- threshold tuning can make event detection look better while still producing an impractical number of false alerts.
+- TCN and Attention-TCN can fit different failure episodes strongly without learning one repeatable warning pattern;
+- threshold tuning can improve event detection while still producing an impractical false-alert rate.
 
-There are obvious follow-ups, especially trying longer input history or getting more independent failure episodes. I stopped here because July has already been inspected; repeatedly redesigning the model around that event would turn the test set into development feedback.
+Longer input history and additional independent failure episodes are reasonable follow-ups. They are not included in this experiment because the July result is already known; redesigning the models around that outcome would turn the holdout into development feedback.
 
 The raw result files and per-window traces are under `evidence/temporal_experiment/`.
