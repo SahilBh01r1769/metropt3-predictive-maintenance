@@ -1,104 +1,92 @@
-# MetroPT-3 Predictive Maintenance — Temporal Generalization Study
+# MetroPT-3 Predictive Maintenance
 
-This project investigates a practical question in predictive maintenance: **does preserving richer temporal structure make failure-warning patterns transfer better to a later, unseen compressor failure?**
+This started as a fairly standard predictive-maintenance project: take the MetroPT-3 compressor telemetry and see whether upcoming air leaks can be predicted early enough to be useful.
 
-Using the MetroPT-3 air-compressor dataset, the study compares three representation levels under the same leakage-safe evaluation protocol:
+The part that became more interesting was the evaluation. I wanted to know whether a model that looks good around one failure would still behave the same way around a later one, so the final comparison uses the same one-hour history for three models:
 
-1. **XGBoost** on engineered one-hour summary features
-2. **TCN** on 120 ordered 30-second steps from the same hour
-3. **Attention-TCN** using the same causal encoder with attention pooling
+- **XGBoost** on engineered summary features
+- **TCN** on the ordered sensor sequence
+- **Attention-TCN** on the same TCN encoder with attention pooling
 
-The result was not a simple “deeper model wins” progression. The temporal models learned strong patterns around different historical failures, but those patterns did not transfer reliably to the held-out July event. XGBoost was less impressive on the development episodes, yet generalized least poorly.
+I tested 1, 3, 6 and 12-hour warning horizons. May and June are used for development; July is the final holdout for this experiment.
 
-**[Open the interactive experiment explorer](https://metropt3-predictive-maintenance.streamlit.app/)**
+The short version: the deeper models did learn strong patterns, but not the same ones. TCN ranked the May precursor very well, Attention-TCN did the same for June, and both fell apart on July. XGBoost held up best on the later event, although the overall result is still not strong enough to call this a useful maintenance predictor.
 
-## At a glance
+**[Open the Streamlit results explorer](https://metropt3-predictive-maintenance.streamlit.app/)**
 
-| | |
-|---|---|
-| Dataset | **1,516,948** raw telemetry rows |
-| Validated rows | **1,515,830** |
-| Continuity segments | **334** |
-| Complete 1-hour windows | **8,012** |
-| Predictive windows | **7,846** after active-failure exclusion |
-| Models | **XGBoost · TCN · Attention-TCN** |
-| Prediction horizons | **1 / 3 / 6 / 12 hours** |
-| Evaluation | May + June development, July final holdout |
-| Repeated runs | **3 seeds** per model/horizon cell |
+## Project snapshot
 
-The pipeline uses training-only preprocessing, explicit raw-timestamp purging, continuity-aware windows, development-only threshold selection, and committed per-window prediction traces.
+- **1,516,948** raw telemetry rows
+- **334** continuity segments after validation and gap handling
+- **8,012** complete one-hour windows
+- **7,846** predictive windows after removing windows inside active failures
+- **3 models × 4 prediction horizons × 3 seeds**
+- committed per-window probabilities, thresholds and result tables
 
-## The experiment
+The raw dataset is not stored in the repo; `scripts/download_data.py` downloads the official MetroPT-3 archive.
 
-```mermaid
-flowchart TD
-    A["MetroPT-3 telemetry"] --> B["Validation + continuity segmentation"]
-    B --> C["Leakage-safe 1-hour windows"]
-    C --> D["XGBoost: engineered summaries"]
-    C --> E["TCN: ordered sequence"]
-    C --> F["Attention-TCN: sequence + attention pooling"]
-    D --> G["1 / 3 / 6 / 12 h targets"]
-    E --> G
-    F --> G
-    G --> H["May + June development"]
-    H --> I["July holdout"]
-    I --> J["Ranking, transfer, alert burden"]
-```
+## What I compared
 
-All three models observe the same one-hour history. The sequence path resamples that hour into 120 ordered 30-second steps across eight sensor/actuator channels plus an observation-coverage channel. Missing-value fallbacks and normalization are fitted only on the relevant training partition.
+| Model | Input | What I wanted to test |
+|---|---|---|
+| XGBoost | 38 engineered features from one hour | whether summary statistics are already enough |
+| TCN | 120 ordered 30-second steps | whether keeping within-hour order helps |
+| Attention-TCN | same sequence and TCN encoder | whether attention pooling adds anything useful |
 
-The final July episode is separated chronologically. Training windows that touch raw timestamps from the later evaluation interval are purged, so overlapping windows cannot leak the same observations across the split.
+All three models see the same amount of history. The sequence models use eight sensor/actuator channels plus one observation-coverage channel.
 
-## Main result
+I did not use a random train/test split. These windows overlap heavily in time, so a random split can put almost the same raw observations on both sides. The final setup keeps July later in time and purges training windows that touch the evaluation interval.
 
-At the one-hour horizon, the three representations behave very differently across failure episodes:
+## What happened
+
+The one-hour horizon shows the main result most clearly:
 
 | Event | XGBoost AP lift | TCN AP lift | Attention-TCN AP lift |
 |---|---:|---:|---:|
-| May development | 1.00× | **14.99×** | 2.18× |
-| June development | 1.64× | 2.57× | **13.60×** |
-| July holdout | **1.63×** | 0.75× | 0.78× |
+| May | 1.00× | **14.99×** | 2.18× |
+| June | 1.64× | 2.57× | **13.60×** |
+| July | **1.63×** | 0.75× | 0.78× |
 
 ![AP lift across failure episodes](figures/cross_event_transfer.png)
 
-The interesting part is the reversal. TCN ranks the May precursor strongly, while Attention-TCN ranks June strongly. Neither ranking transfers to July. XGBoost is weaker on the development episodes but fails least severely on the later event.
+The surprising part is not simply that the neural models score poorly on July. It is that each of them looks convincing on a different earlier failure. That made me treat this as an event-to-event transfer problem rather than keep adding model complexity.
 
-Across the four July horizons, XGBoost ranks best of the three representations, although the absolute held-out performance remains weak. That makes the result useful as a **cross-event generalization study**, not as evidence of a deployable warning model.
+Across all four July horizons, XGBoost ranks best of the three, but the held-out performance is still weak. The detailed numbers are in [RESULTS.md](RESULTS.md).
 
 ![Held-out horizon comparison](figures/horizon_performance.png)
 
-## Why the transfer failed
+## Looking at the sensor regimes
 
-A follow-up diagnostic compares engineered sensor features during the 24 hours before the May, June and July failures against clean normal-operation windows. Several feature directions repeat, but their magnitudes vary substantially; July often occupies a much stronger shifted regime.
+After seeing the transfer problem, I added one descriptive check rather than another predictor. It compares engineered features during the 24 hours before the May, June and July failures with normal operating windows.
 
 ![Pre-failure feature shifts](figures/event_regime_shift.png)
 
-For example, standardized precursor shifts for `TP2_mean`, `pressure_diff_mean` and `H1_mean` are much larger in July than in May or June. With only a few independent failure episodes, the evidence is consistent with **episode-specific precursor structure** rather than one stable warning signature.
+Some directions repeat, but the size of the shift changes a lot between events. July is especially different for features such as `TP2_mean`, `pressure_diff_mean` and `H1_mean`. With so few independent failures, that is enough to explain why I stopped treating the window count as if it were a large sample of failure behavior.
 
-The diagnostic is descriptive and does not change the frozen model results. Full tables are in [`evidence/event_regime`](evidence/event_regime).
+The underlying tables are in `evidence/event_regime/`.
 
-## From scores to maintenance alerts
+## Alert thresholds
 
-The project also tests what the probabilities would imply as an alert policy.
+I also checked what the model scores would look like as maintenance alerts.
 
-The default `0.5` threshold detects no July event. Thresholds selected only from May/June development data recover July in some model/horizon settings, but the added detection comes with very low precision and frequent false alerts. For example, XGBoost detects July in all seeds at the 3, 6 and 12-hour horizons while producing about **1.49 false-alert episodes per evaluated day**.
+At the default `0.5` threshold, none of the models detects the July event. Thresholds picked only from May/June can recover July in some settings, but usually by accepting a lot of false alarms. For example, XGBoost detects July in all three seeds at 3, 6 and 12 hours with about **1.49 false-alert episodes per evaluated day**.
 
-That trade-off is why the project reports ranking quality together with event detection, first-warning lead time and false-alert burden rather than presenting “failure detected” in isolation.
+So I report alert detection together with precision, lead time and false-alert burden rather than treating “event detected” as enough.
 
-![Threshold and alert burden](figures/threshold_alert_burden.png)
+![Threshold and false-alert trade-off](figures/threshold_alert_burden.png)
 
-## Interactive evidence explorer
+## Results explorer
 
-The Streamlit app is a compact experiment viewer backed by the committed evidence rather than a simulated production dashboard.
+The Streamlit app reads the saved experiment outputs. It is not a simulated live maintenance product.
 
-It lets a visitor change:
+You can switch between:
 
-- model: XGBoost, TCN or Attention-TCN
-- prediction horizon: 1, 3, 6 or 12 hours
-- failure episode: May, June or July
-- threshold policy: fixed `0.5` or development-selected
+- XGBoost, TCN and Attention-TCN
+- 1, 3, 6 and 12-hour horizons
+- May, June and July
+- the fixed `0.5` threshold and the threshold selected on development data
 
-The views cover held-out ranking, cross-event transfer, probability timelines, seed variation, event detection, lead time and false-alert burden.
+Run it locally with:
 
 ```bash
 python -m venv .venv
@@ -108,11 +96,11 @@ pip install -e .
 streamlit run demo/app.py
 ```
 
-See [`demo/README.md`](demo/README.md) for the evidence boundary.
+## Reproducing the experiment
 
-## Reproduce and audit
+The final experiment settings are in `configs/temporal_experiment.json` and the Colab run is in `notebooks/02_temporal_experiment_colab.ipynb`.
 
-Generate the committed figures from the evidence tables:
+To regenerate the result plots from the committed tables:
 
 ```bash
 pip install -r requirements-experiment.txt
@@ -120,51 +108,31 @@ pip install -e .
 python scripts/generate_evidence_plots.py
 ```
 
-Recompute the May/June/July ranking tables from prediction traces:
+To recompute the event-wise ranking tables from the saved probability traces:
 
 ```bash
 python scripts/analyze_temporal_results.py
 ```
 
-The full experiment configuration is frozen in [`configs/temporal_experiment.json`](configs/temporal_experiment.json) and can be rerun with [`notebooks/02_temporal_experiment_colab.ipynb`](notebooks/02_temporal_experiment_colab.ipynb).
+The committed outputs are enough to audit the reported metrics. The model binaries were not part of the returned Colab export, so reproducing the exact predictions requires retraining from the saved configuration.
 
-The committed evidence contains metrics, thresholds, histories, manifests and per-window probability traces. Exact prediction recreation requires retraining because the model binaries were not included in the returned export.
-
-## Engineering details
-
-The project includes:
-
-- cadence-aware validation and quarantine
-- continuity segmentation across telemetry gaps
-- active-failure exclusion before predictive labeling
-- half-open one-hour feature windows
-- raw-timestamp purging across the temporal split
-- training-only normalization and missing-value handling
-- causal TCN convolutions
-- rare-event evaluation with AP interpreted against prevalence
-- development-only early stopping and threshold selection
-- alert-level metrics for detection, lead time and false-alert episodes
-- committed experiment traces and reproducible evidence plots
-
-The full protocol is in [`EXPERIMENT_PROTOCOL.md`](EXPERIMENT_PROTOCOL.md), the detailed results are in [`RESULTS.md`](RESULTS.md), and the deeper cross-event interpretation is in [`GENERALIZATION_ANALYSIS.md`](GENERALIZATION_ANALYSIS.md).
-
-## Repository map
+## Repository layout
 
 ```text
-configs/temporal_experiment.json     frozen experiment configuration
-evidence/temporal_experiment/       metrics and per-window prediction traces
-evidence/event_regime/              precursor-regime diagnostics
-figures/                             generated evidence plots
-src/metropt3/                        validation, windows, sequences, models and analysis
-notebooks/                           data audit, model experiment and diagnostics
-demo/app.py                          interactive experiment explorer
-RESULTS.md                           measured results
-GENERALIZATION_ANALYSIS.md           cross-event generalization analysis
-INVESTIGATION_LOG.md                 compact decision history
+src/metropt3/                  preprocessing, sequence models and experiment code
+configs/                       final experiment settings
+evidence/                      saved metrics and probability traces
+figures/                       plots built from those results
+notebooks/                     data audit, training and follow-up diagnostics
+demo/app.py                    Streamlit results explorer
+RESULTS.md                     detailed numbers and interpretation
+EXPERIMENT_PROTOCOL.md         setup used for the final run
 ```
 
-## Scope
+## A few limits
 
-This repository is a controlled case study on one compressor dataset with very few independent failure episodes. It is intended to show how the predictive-maintenance question was investigated, how leakage and rare-event evaluation were handled, and what the model comparison actually established—not to claim a production-ready maintenance system.
+There are many overlapping windows but only a few independent failure episodes. This repo therefore says more about **how the models behaved on these separate events** than about expected performance on another compressor.
 
-Dataset: **MetroPT-3**, a public air-compressor telemetry dataset. The download script is provided in `scripts/download_data.py`; the raw 218 MB CSV is intentionally not stored in Git.
+July was untouched for the final three-model comparison. Since those results are now known, any new feature or architecture designed specifically because July failed would be a follow-up experiment, not another untouched test.
+
+Dataset: **MetroPT-3** public air-compressor telemetry.

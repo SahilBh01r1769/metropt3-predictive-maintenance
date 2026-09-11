@@ -1,31 +1,10 @@
-# Temporal representation experiment
+# Results
 
-The controlled comparison did not produce a useful failure predictor. It did produce
-a clear result: on the final July episode, increasing representation complexity from
-engineered summaries to ordered sequences and attention did not improve transfer.
+These are the numbers from the final XGBoost / TCN / Attention-TCN comparison.
 
-![Held-out performance across horizons](figures/horizon_performance.png)
+I use average precision (AP) as the main ranking metric because the positive class is very small. AP lift is simply `AP / positive prevalence`, so `1.0×` is roughly random-ranking performance for that horizon.
 
-## Experimental question
-
-Can one hour of compressor history rank windows preceding an unseen air-leak episode
-above ordinary operating windows, and does preserving within-hour order help?
-
-Only the representation and model change:
-
-1. **XGBoost** receives 38 engineered one-hour summary features.
-2. **TCN** receives 120 ordered 30-second steps across nine channels.
-3. **Attention-TCN** uses the same causal TCN encoder and adds attention pooling.
-
-All models use the same 7,846 predictive windows, 1/3/6/12-hour targets, fixed July
-holdout, three seeds and training-only preprocessing. Early stopping and operational
-thresholds use two earlier chronological development folds. July is never used for
-tuning.
-
-## Primary result: probability ranking
-
-Average precision (AP) is averaged over seeds 17, 42 and 89. Lift divides AP by the
-positive prevalence for that horizon; `1.0×` is random-ranking performance.
+## July holdout
 
 | Model | Horizon | AP, mean ± SD | AP lift | ROC-AUC |
 |---|---:|---:|---:|---:|
@@ -42,54 +21,35 @@ positive prevalence for that horizon; `1.0×` is random-ranking performance.
 | Attention-TCN | 6 h | 0.003226 ± 0.000011 | 0.55× | 0.008 |
 | Attention-TCN | 12 h | 0.006306 ± 0.000044 | 0.53× | 0.025 |
 
-XGBoost ranks best at every horizon, but only its one-hour result rises materially
-above prevalence. Its ROC-AUC remains below 0.5 at every horizon. Both sequence models
-rank the July positives below most negative windows; attention does not repair that
-failure.
+![Held-out performance across horizons](figures/horizon_performance.png)
 
-Absolute AP rises with the horizon because the number of positive windows rises from
-2 at one hour to 24 at twelve hours. Lift is therefore the fairer cross-horizon view.
-The experiment does not support a claim that the twelve-hour task is learned better.
+XGBoost is the best of the three on July at every horizon, but that should not be read as a strong model result. Its ROC-AUC is still below 0.5 throughout, and only the one-hour AP is clearly above prevalence.
 
-## Event-to-event transfer
+The sequence models are worse: on July they generally assign lower scores to pre-failure windows than to ordinary windows.
 
-The July collapse is not evidence that the sequence models learned nothing. Replaying
-the same threshold-free metrics separately for each failure shows that they learned
-different development episodes. The one-hour results make the contrast clearest:
+Absolute AP increases at longer horizons because there are more positive windows. That is why I use AP lift when comparing 1h vs 12h rather than comparing AP alone.
+
+## May vs June vs July
+
+The event-by-event replay is the part I found most useful:
 
 | Event | XGBoost AP lift | TCN AP lift | Attention-TCN AP lift |
 |---|---:|---:|---:|
-| May development failure | 1.00× | **14.99×** | 2.18× |
-| June development failure | 1.64× | 2.57× | **13.60×** |
-| July final holdout | **1.63×** | 0.75× | 0.78× |
-
-These are means over the same three seeds, but the three rows are only three failure
-episodes. TCN ranks the May precursor strongly; attention ranks the June precursor
-strongly; neither behavior transfers to July. That reversal is the central modeling
-result: added capacity fits episode-specific signals without establishing a shared
-warning signature.
-
-The event-wise tables are generated directly from the committed probability traces:
-
-```bash
-python scripts/analyze_temporal_results.py
-```
-
-They record AP, lift over prevalence, ROC-AUC and positive-versus-negative median score
-separation for every event, model, horizon and seed.
+| May | 1.00× | **14.99×** | 2.18× |
+| June | 1.64× | 2.57× | **13.60×** |
+| July | **1.63×** | 0.75× | 0.78× |
 
 ![Cross-event transfer](figures/cross_event_transfer.png)
 
-## Sensor-regime diagnostic
+TCN looks very strong around May. Attention-TCN looks very strong around June. Neither pattern repeats in July.
 
-The committed event-regime extraction compares the median of each engineered feature
-in the 24 hours before May, June and July failure onset with a clean normal-window
-baseline. The effect is standardized by the normal-window interquartile range; it is
-descriptive, not a new predictor or a significance test.
+I do not think this means the neural networks simply failed to train. They found real score structure on the development episodes; the problem is that the useful structure changes from one failure to another.
 
-![Sensor-regime shifts](figures/event_regime_shift.png)
+That is also why adding another deep architecture did not seem like the right next step.
 
-Several directions are shared, but the magnitudes are not. For example:
+## Sensor check after the model run
+
+I compared engineered feature values from the 24 hours before each failure with clean normal-operation windows. The values below are standardized by the normal-window interquartile range.
 
 | Feature | May | June | July |
 |---|---:|---:|---:|
@@ -99,26 +59,21 @@ Several directions are shared, but the magnitudes are not. For example:
 | `Oil_temperature_mean` | +0.43 | +0.10 | **+1.15** |
 | `Motor_current_max` | −0.62 | −0.38 | −0.27 |
 
-This supports a narrower episode-shift explanation: some broad sensor directions recur,
-but July occupies a materially different regime and the effect size is not stable.
-The comparison contains only three failure episodes, so it cannot establish a universal
-precursor signature. Near-constant features are retained in the CSV but should not be
-interpreted from a large standardized value alone.
+![Sensor-regime shifts](figures/event_regime_shift.png)
 
-The diagnostic bundle does not change the frozen model metrics. The returned importance
-CSV still has the old two-column shape and all-zero values, so it is not retained as
-feature-importance evidence: its key provenance cannot be established after the fact.
-The current extractor maps both named and positional XGBoost keys and records the
-mapping source for every feature. A future run can therefore distinguish a genuine
-no-split model from an unused feature; no importance claim is made here.
+There are a few repeated directions, but July is much more extreme on several pressure-related features. With only three evaluated failure episodes, I would not call that a universal precursor. It is better read as evidence that the operating/failure regime is not stable across events.
 
-## Alert policy result
+The full diagnostic tables are in `evidence/event_regime/`.
 
-The `0.5` reference threshold detects no held-out event for any model, horizon or seed.
-The following table uses thresholds selected only from pooled development predictions.
-“Detected” is the number of seeds with at least one true-positive July alert.
+I originally attempted to recover XGBoost feature importance from an exported CSV, but the old file had all-zero values and unclear key mapping. I chose not to report it as evidence. The current extraction code records the mapping correctly for future runs.
 
-| Model | Horizon | Threshold | Detected | False-alert episodes/day | First-alert lead time |
+## Thresholds and alerts
+
+The fixed `0.5` threshold detects no July event for any model/horizon/seed combination.
+
+The table below uses thresholds chosen only from May/June development predictions. “Detected” is the number of seeds that produced at least one true-positive July alert.
+
+| Model | Horizon | Threshold | Detected | False alerts/day | First alert lead |
 |---|---:|---:|---:|---:|---:|
 | XGBoost | 1 h | 0.30 | 1/3 | 3.44 | 0.53 h |
 | XGBoost | 3 h | 0.38 | 3/3 | 1.49 | 2.53 h |
@@ -133,19 +88,13 @@ The following table uses thresholds selected only from pooled development predic
 | Attention-TCN | 6 h | 0.05 | 1/3 | 2.53 | 5.53 h |
 | Attention-TCN | 12 h | 0.06 | 2/3 | 1.02 | 11.53 h |
 
-These detections are not evidence of a deployable alert policy. At 3/6/12 hours,
-XGBoost's mean recall is 1.0 but its precision is only 0.003/0.006/0.012 and balanced
-accuracy is 0.5. The development threshold has become permissive enough to flag the
-event while also flagging many ordinary periods. TCN's twelve-hour detection has the
-same problem: mean precision is 0.0085 with 2.24 false-alert episodes per evaluated
-day.
-
 ![Threshold choice and false-alert burden](figures/threshold_alert_burden.png)
 
-## Cost of representation complexity
+This is a good example of why “detected the failure” is not enough. XGBoost detects July at 3h/6h/12h after lowering the threshold, but precision remains very low and the false-alert rate is high.
 
-Measurements below are means across all horizons and seeds from the same Tesla T4
-session. Timing is execution evidence, not a cross-machine benchmark.
+## Runtime
+
+These timings came from the same Tesla T4 session. They are useful for relative cost inside this run, not as general hardware benchmarks.
 
 | Model | Mean development fit | Mean final fit | Mean prediction | Stored artifact | Parameters |
 |---|---:|---:|---:|---:|---:|
@@ -153,34 +102,29 @@ session. Timing is execution evidence, not a cross-machine benchmark.
 | TCN | 29.26 s | 8.31 s | 0.018 s | 126.9 KB | 29,185 |
 | Attention-TCN | 25.13 s | 5.51 s | 0.018 s | 132.6 KB | 30,274 |
 
-The sequence models cost roughly two orders of magnitude more fit time than XGBoost
-without improving held-out ranking. Attention adds 1,089 parameters and also fails to
-improve ranking over the shared TCN encoder.
-
 ![Fit cost versus held-out ranking](figures/fit_cost_vs_ranking.png)
 
-## Event-centered scores
+The TCN models cost much more to fit and did not improve the held-out ranking. Attention adds 1,089 parameters over the TCN and did not rescue the result.
 
-The probability traces show the ranking failure directly rather than reducing it to a
-single score. Development models produce episode-specific score structure before May
-and June, while the July precursor remains below or indistinguishable from ordinary
-windows for the sequence models.
+## Probability traces
+
+The saved per-window predictions make the event behavior easier to see than a single score:
 
 ![Event-centered probability timelines](figures/event_probability_timelines.png)
 
-## What this experiment establishes
+The development events show clear model-specific score structure. July does not reproduce it for the sequence models.
 
-- The corrected pipeline runs end to end over the audited 1.5-million-row dataset.
-- Raw training and holdout timestamps are explicitly disjoint.
-- Per-window probabilities expose failures that summary scores previously hid.
-- XGBoost is the strongest of the three representations, but its advantage is weak.
-- More expressive temporal models do not compensate for very few independent failure
-  episodes or a non-transferable representation.
-- A threshold can create apparent event detection without useful ranking or acceptable
-  alert precision.
+## My read of the result
 
-This is evidence from one held-out failure episode. It is a case study of transfer to
-July, not an estimate of performance across compressors or failure types.
+The strongest conclusion is not “XGBoost solves MetroPT-3.” It does not.
 
-The complete 72 metric rows and the exported prediction traces are in
-[`evidence/temporal_experiment`](evidence/temporal_experiment/README.md).
+What I think this experiment shows is:
+
+- overlapping time windows can make the dataset look much larger than the number of genuinely independent failures;
+- preserving more temporal detail does not automatically improve transfer;
+- the TCN and Attention-TCN can fit different failure episodes strongly without learning one repeatable warning pattern;
+- threshold tuning can make event detection look better while still producing an impractical number of false alerts.
+
+There are obvious follow-ups, especially trying longer input history or getting more independent failure episodes. I stopped here because July has already been inspected; repeatedly redesigning the model around that event would turn the test set into development feedback.
+
+The raw result files and per-window traces are under `evidence/temporal_experiment/`.

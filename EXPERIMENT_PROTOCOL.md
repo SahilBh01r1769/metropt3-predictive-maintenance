@@ -1,132 +1,103 @@
-# Temporal representation experiment protocol
+# Experiment setup
 
-Status: frozen before implementing or running the corrected comparison. The
-measured audit evidence is summarized in `evidence/data_audit_summary.json`;
-the resulting executable decisions are fixed in
-`configs/temporal_experiment.json`.
+This file records the rules used for the final model comparison. Most of these choices were fixed before the full run so I would not keep moving the setup after seeing July.
+
+The actual values live in `configs/temporal_experiment.json`.
 
 ## Question
 
-Given one hour of compressor telemetry, which representation transfers most
-usefully to a later documented failure: engineered window summaries, learned
-temporal patterns, or learned patterns with attention over the history? The
-study also asks whether this changes at `1`, `3`, `6`, and `12` hours before a
-failure.
+Given one hour of compressor history, does keeping more of the temporal structure help predict an upcoming air leak?
 
-The final July failure is one untouched, held-out episode. It is evidence about
-transfer to that episode, not a claim of broad performance across compressors
-or failure types.
+The comparison is:
 
-## Evidence held constant
+- XGBoost on engineered one-hour features
+- TCN on a 120-step sequence built from the same hour
+- Attention-TCN using the same TCN encoder plus attention pooling
 
-All cells use the same validated rows, continuity segmentation, one-hour
-history windows, 30-minute window step, documented failure intervals, and the
-same horizon labels. Rate-of-change is per elapsed time. A feature or sequence
-window that overlaps an active failure is quarantined before splitting.
+The target is tested at 1, 3, 6 and 12 hours before failure.
 
-The test boundary is fixed independently of labels and horizon:
+## Data and windows
 
-- held-out failure start: `2020-07-15 14:30:00`;
-- test selection boundary: `2020-07-08 14:30:00`;
-- test windows end on or after that boundary;
-- a training window is purged when any raw timestamp used by it belongs to the
-  test interval;
-- no chronological-tail fallback is allowed.
+The final data audit found:
 
-If a cell lacks a class, the run remains an honest unscorable result; the
-boundary is not moved to manufacture a metric.
+- 1,516,948 raw rows
+- 1,515,830 valid rows
+- 334 continuity segments
+- 8,012 complete one-hour windows
+- 7,846 predictive windows after removing windows that overlap active failures
 
-The data audit measured a 10-second median cadence, 12 seconds at the 99th
-percentile, 8,012 complete feature windows and 334 continuity segments. The
-sequence path therefore aggregates into 30-second means: 120 ordered steps per
-one-hour window. This absorbs normal cadence jitter without reducing the history
-to minute-level summaries. The audit is data description, not model selection.
+A gap larger than the configured continuity limit starts a new segment. Windows never cross those gaps.
 
-## Predeclared representation ladder
+The sequence version of a one-hour window is resampled to 120 steps of 30 seconds. Analogue channels use limited interpolation for short internal gaps; the compressor state is forward-filled within the same limit. An observation-coverage channel is kept so missingness is not silently erased.
 
-Exactly three models are compared. They form a progression in how much temporal
-structure the model is asked to learn rather than a model zoo.
+One correction happened before this final experiment: the original rate-of-change feature divided by row count. It was changed to elapsed hours so cadence changes do not alter the meaning of the feature.
 
-| Level | Model | Input | Purpose |
-| --- | --- | --- | --- |
-| 1 | XGBoost | engineered one-hour summaries | Strong nonlinear tabular reference: can use interactions in the existing feature engineering. |
-| 2 | Temporal Convolutional Network (TCN) | resampled, ordered one-hour sensor sequence | Tests whether local and longer temporal patterns add evidence beyond summaries. |
-| 3 | Attention-TCN | same sequence and TCN encoder | Tests whether selectively pooling historical positions changes the ranking or alert burden. |
+## Split
 
-The TCN uses causal temporal convolutions: the representation at a window end
-uses only observations at or before that end. Attention pooling is applied to
-the encoded past sequence only. Its weights are diagnostic model focus, not a
-causal explanation of a physical failure.
+I did not use a random split because the 30-minute step creates heavily overlapping one-hour windows.
 
-XGBoost receives the existing engineered features, including elapsed-time
-rate-of-change. The two sequence models receive the audited raw signal channels
-plus explicitly versioned derived channels. Imputation and normalization for
-each model are fitted on training data only. No model sees future samples,
-failure-period samples, or test-derived normalization statistics.
+May and June are used for development. July is the final holdout for this comparison.
 
-Graph neural networks are excluded because this dataset does not supply a
-defensible graph. Transformers are excluded because four documented failure
-episodes are insufficient evidence for that capacity increase. A recurrent
-model is not added merely to make a ladder; the controlled question is
-summary-versus-convolutional temporal representation-versus-attention pooling.
+The test-selection boundary is `2020-07-08 14:30:00`, before the July failure. Training windows are purged if any raw timestamp they use also belongs to the later evaluation interval.
 
-## Development and final evaluation
+That means the two sides are separated by raw observations, not just by feature-row IDs.
 
-The earlier documented failures are used only for rolling-origin development:
-to verify the pipeline, select the fixed operational threshold, and reject
-broken configurations. The final July episode is not used for architecture,
-feature, threshold, or epoch selection. A compact configuration, fixed seed,
-and early-stopping rule are written to the experiment configuration before the
-full run.
+The split is not moved when a horizon produces very few positives.
 
-Every model is evaluated at `1`, `3`, `6`, and `12` hours. Changing the horizon
-changes only the target label; input history, split, and preprocessing rules do
-not change.
+## Why one hour
 
-Hypotheses:
+One hour was chosen because it gives the tabular and sequence models the same bounded history and is long enough to contain short operating changes without making the sequence large.
 
-- Shorter horizons may be easier if this telemetry contains late precursors.
-- TCN may beat summary features if the order and duration of changes matter.
-- Attention-TCN may improve results only if different portions of the history
-  are consistently useful across separate failure episodes.
+It was not selected by searching several history lengths. A 3h or 6h history would be a separate follow-up experiment.
 
-A collapse, a tie, or a worse attention model is a result: it limits what this
-dataset supports.
+## Models
 
-## Metrics and threshold policy
+### XGBoost
 
-Average precision is primary because positive windows are rare. Positive
-prevalence and `AP / prevalence` are reported to compare horizon difficulty.
-The remaining metrics are ROC-AUC when both classes exist, Brier score,
-balanced accuracy, precision, recall, F1, and confusion counts.
+Uses the existing 38 engineered window features. This is the strong tabular reference.
 
-The reference hard threshold is `0.5` for every cell. One operational threshold
-may be selected from earlier rolling-origin development only, using a fixed
-rule recorded before the final run; it is then frozen and applied unchanged to
-the July holdout. Both reference and operational results are shown, never
-quietly substituted for each other.
+### TCN
 
-An alert is a chronological `0 -> 1` prediction transition. A negative
-prediction, gap, or segment boundary ends an alert run. A false alert begins on
-a negative-labelled window. The report includes false-alert episodes per
-evaluated day, held-out-event detection, and first-alert lead time. The latter
-is one case outcome per cell, not a population detection rate.
+Uses causal 1D convolutions over the ordered sequence. The model only uses samples at or before the end of the current window.
 
-## Required evidence
+### Attention-TCN
 
-Each model/horizon run persists a per-window trace with model, horizon,
-segment ID, window start/end, true label, probability, reference prediction,
-operational prediction, and time to next failure. The run manifest records
-dataset identity, audit/resampling configuration, feature or channel names,
-normalization fit scope, split boundaries, counts, seeds, package versions,
-model parameters, fit/prediction time, parameter count where applicable, and
-serialized artifact size.
+Uses the same TCN encoder and replaces last-step pooling with learned attention pooling.
 
-Result tables compare models only within a horizon. Average precision is not
-averaged across horizons with different prevalence. A difference under `0.01`
-AP is reported as a practical tie, not as significance. Time and size are
-secondary, same-environment measurements.
+The point of the third model is to test whether the pooling change helps, not to build the biggest architecture possible.
 
-The run stops rather than reporting results if timestamp disjointness fails,
-window IDs differ unexpectedly across cells, labels vary under an otherwise
-identical horizon, or normalization includes holdout observations.
+I did not add an LSTM or Transformer after this. With only a few independent failures, adding more architectures would make the comparison wider without fixing the evidence problem.
+
+## Training
+
+Normalization and missing-value fallback values are fitted on the training partition only.
+
+The three seeds are `17`, `42` and `89`.
+
+Development folds are used for early stopping and for selecting one operational threshold. July is not used for either.
+
+The reference threshold remains `0.5` so it is always possible to compare the tuned alert policy with the default classifier output.
+
+## Metrics
+
+Average precision is the main ranking metric because positives are rare.
+
+I also report positive prevalence and `AP / prevalence` (AP lift). The lift is useful when comparing horizons because a 12-hour target naturally has more positive windows than a 1-hour target.
+
+Other saved metrics include ROC-AUC, Brier score, balanced accuracy, precision, recall, F1 and confusion counts.
+
+For alert behavior I also record:
+
+- false-alert episodes per evaluated day
+- whether the held-out event was detected
+- first-alert lead time
+
+A false alert is counted as a new positive run on a negative-labelled period; a negative prediction, gap or segment boundary ends the run.
+
+## Saved outputs
+
+Each model/horizon run saves per-window probabilities together with the window timestamps, label, thresholded predictions and time to next failure. The run metadata also records the split, feature/channel names, package versions, model settings and timing information.
+
+Those saved probabilities are what `RESULTS.md`, the plots and the Streamlit explorer use.
+
+If a split check fails, labels disagree between otherwise identical cells, or preprocessing touches the holdout, the run stops rather than continuing with those results.
