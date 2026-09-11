@@ -14,10 +14,12 @@ July precursor windows. Only three independent failure episodes are available.
 read as causal or reliable effects; the normal interquartile range can be close to
 zero.
 
-The first Colab extraction produced an all-zero XGBoost importance file because the
-script used positional feature keys while the estimator preserved DataFrame column
-names. That file is intentionally not included. The corrected command now maps native
-gain values by column name and fails loudly if the estimator returns no gains:
+The first extraction's importance mapping was ambiguous across XGBoost versions: some
+backends return DataFrame column names while others return positional `f0`, `f1`, …
+keys. The extractor now supports both and records `importance_key` for every feature.
+If all gains are zero with `importance_key=not_used`, the fitted model made no split
+using that feature; this is a result to report, not a reason to invent an importance.
+If positional keys are present, they are mapped back to the audited feature order.
 
 ```bash
 python scripts/analyze_event_regimes.py --csv data/MetroPT3\(AirCompressor\).csv

@@ -108,15 +108,22 @@ def xgboost_gain_importance(windows: pd.DataFrame) -> pd.DataFrame:
         n_jobs=1,
     )
     model.fit(train[columns], y)
-    # Passing a DataFrame preserves column names in the booster. XGBoost therefore
-    # returns names such as ``TP2_mean`` rather than positional ``f0`` keys.
     gains = model.get_booster().get_score(importance_type="gain")
-    if not gains:
-        raise RuntimeError("XGBoost produced no feature gains")
     return pd.DataFrame(
         {
             "feature": columns,
-            "gain": [float(gains.get(column, 0.0)) for column in columns],
+            "gain": [
+                float(gains.get(column, gains.get(f"f{index}", 0.0)))
+                for index, column in enumerate(columns)
+            ],
+            "importance_key": [
+                "named"
+                if column in gains
+                else "positional"
+                if f"f{index}" in gains
+                else "not_used"
+                for index, column in enumerate(columns)
+            ],
         }
     ).sort_values("gain", ascending=False, ignore_index=True)
 
