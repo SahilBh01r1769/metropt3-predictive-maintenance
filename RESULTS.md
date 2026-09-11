@@ -4,6 +4,8 @@ The controlled comparison did not produce a useful failure predictor. It did pro
 a clear result: on the final July episode, increasing representation complexity from
 engineered summaries to ordered sequences and attention did not improve transfer.
 
+![Held-out performance across horizons](figures/horizon_performance.png)
+
 ## Experimental question
 
 Can one hour of compressor history rank windows preceding an unseen air-leak episode
@@ -76,6 +78,8 @@ python scripts/analyze_temporal_results.py
 They record AP, lift over prevalence, ROC-AUC and positive-versus-negative median score
 separation for every event, model, horizon and seed.
 
+![Cross-event transfer](figures/cross_event_transfer.png)
+
 ## Alert policy result
 
 The `0.5` reference threshold detects no held-out event for any model, horizon or seed.
@@ -104,6 +108,8 @@ event while also flagging many ordinary periods. TCN's twelve-hour detection has
 same problem: mean precision is 0.0085 with 2.24 false-alert episodes per evaluated
 day.
 
+![Threshold choice and false-alert burden](figures/threshold_alert_burden.png)
+
 ## Cost of representation complexity
 
 Measurements below are means across all horizons and seeds from the same Tesla T4
@@ -118,6 +124,17 @@ session. Timing is execution evidence, not a cross-machine benchmark.
 The sequence models cost roughly two orders of magnitude more fit time than XGBoost
 without improving held-out ranking. Attention adds 1,089 parameters and also fails to
 improve ranking over the shared TCN encoder.
+
+![Fit cost versus held-out ranking](figures/fit_cost_vs_ranking.png)
+
+## Event-centered scores
+
+The probability traces show the ranking failure directly rather than reducing it to a
+single score. Development models produce episode-specific score structure before May
+and June, while the July precursor remains below or indistinguishable from ordinary
+windows for the sequence models.
+
+![Event-centered probability timelines](figures/event_probability_timelines.png)
 
 ## What this experiment establishes
 
