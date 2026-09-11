@@ -80,6 +80,37 @@ separation for every event, model, horizon and seed.
 
 ![Cross-event transfer](figures/cross_event_transfer.png)
 
+## Sensor-regime diagnostic
+
+The committed event-regime extraction compares the median of each engineered feature
+in the 24 hours before May, June and July failure onset with a clean normal-window
+baseline. The effect is standardized by the normal-window interquartile range; it is
+descriptive, not a new predictor or a significance test.
+
+![Sensor-regime shifts](figures/event_regime_shift.png)
+
+Several directions are shared, but the magnitudes are not. For example:
+
+| Feature | May | June | July |
+|---|---:|---:|---:|
+| `TP2_mean` | +0.27 | +0.09 | **+4.50** |
+| `pressure_diff_mean` | −0.50 | −0.12 | **−5.03** |
+| `H1_mean` | −0.46 | −0.13 | **−4.91** |
+| `Oil_temperature_mean` | +0.43 | +0.10 | **+1.15** |
+| `Motor_current_max` | −0.62 | −0.38 | −0.27 |
+
+This supports a narrower episode-shift explanation: some broad sensor directions recur,
+but July occupies a materially different regime and the effect size is not stable.
+The comparison contains only three failure episodes, so it cannot establish a universal
+precursor signature. Near-constant features are retained in the CSV but should not be
+interpreted from a large standardized value alone.
+
+The diagnostic bundle does not change the frozen model metrics. The first extraction's
+all-zero native-importance file was rejected after inspection: XGBoost had preserved
+DataFrame column names, while the initial script looked for positional keys. The
+extractor now maps names correctly and fails loudly if no gains are returned. Its
+importance output remains a model-inspection aid, not evidence of transfer.
+
 ## Alert policy result
 
 The `0.5` reference threshold detects no held-out event for any model, horizon or seed.

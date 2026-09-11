@@ -269,14 +269,38 @@ def plot_event_timelines(evidence_root: Path, output: Path) -> Path:
     return _finish(fig, output)
 
 
+def plot_event_regime_heatmap(regime_path: Path, output: Path) -> Path:
+    frame = pd.read_csv(regime_path).set_index("feature")
+    columns = ["may_failure", "june_failure", "july_holdout"]
+    values = frame[columns].to_numpy(dtype=float)
+    fig, ax = plt.subplots(figsize=(7.6, max(5.2, len(frame) * 0.18)))
+    image = ax.imshow(values, aspect="auto", cmap="coolwarm", vmin=-2, vmax=2)
+    ax.set(
+        title="Pre-failure feature shifts versus clean normal windows",
+        xlabel="Failure episode",
+        ylabel="Engineered feature",
+        xticks=np.arange(len(columns)),
+        xticklabels=[EVENT_LABELS[column] for column in columns],
+        yticks=np.arange(len(frame.index)),
+        yticklabels=frame.index,
+    )
+    ax.tick_params(axis="y", labelsize=7)
+    fig.colorbar(image, ax=ax, label="Robust standardized difference (clipped at ±2)")
+    return _finish(fig, output)
+
+
 def generate_evidence_plots(evidence_root: str | Path, output_dir: str | Path) -> list[Path]:
     root = Path(evidence_root)
     output = Path(output_dir)
     metrics, eventwise = load_evidence(root)
-    return [
+    figures = [
         plot_horizon_performance(eventwise, output / "horizon_performance.png"),
         plot_cross_event_transfer(eventwise, output / "cross_event_transfer.png"),
         plot_threshold_burden(metrics, output / "threshold_alert_burden.png"),
         plot_cost_vs_ranking(metrics, output / "fit_cost_vs_ranking.png"),
         plot_event_timelines(root, output / "event_probability_timelines.png"),
     ]
+    regime_path = root.parent / "event_regime" / "event_regime_summary.csv"
+    if regime_path.exists():
+        figures.append(plot_event_regime_heatmap(regime_path, output / "event_regime_shift.png"))
+    return figures

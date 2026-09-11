@@ -69,6 +69,16 @@ These are many overlapping windows but only three evaluated failure episodes. Th
 seed repetitions measure optimization sensitivity; they do not create additional
 independent failures.
 
+The raw-window diagnostic adds context without training another predictor. Comparing
+24-hour precursor summaries with clean normal windows shows that several directions
+repeat, but July often has much larger shifts than May or June. That is consistent with
+episode-regime shift, not proof that one sensor feature causes failure.
+
+![Pre-failure feature shifts](figures/event_regime_shift.png)
+
+The diagnostic tables are in [evidence/event_regime](evidence/event_regime). They are
+descriptive and do not alter the frozen model results.
+
 Across all four July horizons, XGBoost ranks best. Its advantage remains weak: mean
 ROC-AUC stays below 0.5, and only its one-hour AP rises materially above prevalence.
 The sequence models assign most July pre-failure windows lower scores than ordinary

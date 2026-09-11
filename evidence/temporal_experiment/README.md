@@ -34,3 +34,7 @@ were not in the returned ZIP. Consequently, the evidence proves the recorded
 predictions and metrics are internally consistent, but it cannot recreate predictions
 without rerunning training. This boundary is stated explicitly instead of treating a
 successful pre-export validation as stronger evidence than it is.
+
+The separate `evidence/event_regime` directory contains descriptive raw-window
+comparisons against clean normal operation. It is not used to tune or replace the
+frozen XGBoost → TCN → Attention-TCN experiment.
