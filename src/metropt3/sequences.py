@@ -9,7 +9,7 @@ import pandas as pd
 
 from .config import ANALOGUE_COLS, DIGITAL_COLS, TIMESTAMP_COL
 from .experiment_config import load_experiment_config
-from .modeling import FINAL_EVENT_TEST_START, chronological_split
+from .splits import FINAL_EVENT_TEST_START, chronological_split
 
 
 OBSERVATION_CHANNEL = "bin_observed_fraction"

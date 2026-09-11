@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "metropt3-predictive-maintenance"
 version = "1.0.0"
-description = "Reproducible predictive-maintenance pipeline for the MetroPT-3 air-compressor dataset"
+description = "Leakage-aware temporal representation study on MetroPT-3 telemetry"
 requires-python = ">=3.11"
 
 [tool.setuptools]

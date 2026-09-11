@@ -20,7 +20,7 @@ from sklearn.metrics import average_precision_score, fbeta_score
 
 from .experiment_config import load_experiment_config
 from .labels import add_failure_labels
-from .modeling import feature_columns, purge_overlapping_training_windows
+from .splits import feature_columns, purge_overlapping_training_windows
 from .sequences import SequenceDataset, fit_sequence_normalizer, split_sequence_indices
 from .temporal_models import build_temporal_model, temporal_parameter_count
 

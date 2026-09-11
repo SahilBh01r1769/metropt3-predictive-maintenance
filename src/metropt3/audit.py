@@ -18,7 +18,7 @@ from .config import (
 )
 from .features import build_windows
 from .labels import add_failure_labels
-from .modeling import FINAL_EVENT_TEST_START, chronological_split
+from .splits import FINAL_EVENT_TEST_START, chronological_split
 from .validation import range_diagnostics, validate_and_segment
 
 
