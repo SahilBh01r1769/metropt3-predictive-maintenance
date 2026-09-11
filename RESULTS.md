@@ -105,11 +105,12 @@ The comparison contains only three failure episodes, so it cannot establish a un
 precursor signature. Near-constant features are retained in the CSV but should not be
 interpreted from a large standardized value alone.
 
-The diagnostic bundle does not change the frozen model metrics. The first extraction's
-all-zero native-importance file was rejected after inspection: XGBoost had preserved
-DataFrame column names, while the initial script looked for positional keys. The
-extractor now maps names correctly and fails loudly if no gains are returned. Its
-importance output remains a model-inspection aid, not evidence of transfer.
+The diagnostic bundle does not change the frozen model metrics. The returned importance
+CSV still has the old two-column shape and all-zero values, so it is not retained as
+feature-importance evidence: its key provenance cannot be established after the fact.
+The current extractor maps both named and positional XGBoost keys and records the
+mapping source for every feature. A future run can therefore distinguish a genuine
+no-split model from an unused feature; no importance claim is made here.
 
 ## Alert policy result
 
