@@ -2,6 +2,10 @@
 
 Predictive-maintenance experiments on the MetroPT-3 air-compressor dataset, with a focus on whether warning patterns learned around earlier failures transfer to a later one.
 
+## What I built
+
+I built the data validation, gap-aware windowing, feature and sequence-model experiments, chronological evaluation, alert analysis, and Streamlit results explorer. The main aim was not to maximize one headline score, but to test whether results from a small number of failure episodes actually transfer to a later event.
+
 The final comparison uses the same one-hour observation history for three models:
 
 - **XGBoost** on engineered summary features
@@ -11,6 +15,10 @@ The final comparison uses the same one-hour observation history for three models
 The models are evaluated at 1, 3, 6 and 12-hour warning horizons. May and June are used for development; July is kept as the final holdout for this experiment.
 
 The main result is not a simple progression where the more complex model wins. TCN performs strongly around the May failure, Attention-TCN around June, but neither pattern transfers well to July. XGBoost is less impressive on the development episodes but holds up best on the later event.
+
+## How the investigation changed
+
+I originally expected the sequence models to improve as the architecture became more expressive. The development results appeared to support that idea, but the July holdout did not. This shifted the project from choosing a winning architecture to examining event-to-event transfer, false-alert burden, and how few independent failures are hidden behind thousands of overlapping windows.
 
 **[Open the Streamlit results explorer](https://metropt3-predictive-maintenance.streamlit.app/)**
 
