@@ -3,7 +3,14 @@ import json
 import pandas as pd
 import pytest
 
-from metropt3.explorer import event_failure_time, summarize_metric_rows, threshold_for
+from metropt3.explorer import (
+    filter_eventwise_rows,
+    filter_metric_rows,
+    event_failure_time,
+    load_event_regime_evidence,
+    summarize_metric_rows,
+    threshold_for,
+)
 
 
 def test_threshold_is_loaded_from_development_selection():
@@ -78,3 +85,68 @@ def test_failure_times_come_from_frozen_config(tmp_path):
     assert event_failure_time(path, "may_failure") == pd.Timestamp(
         "2020-05-29 23:30"
     )
+
+
+def test_metric_filter_defaults_to_all_seeds_and_can_select_one():
+    frame = pd.DataFrame(
+        {
+            "model": ["xgboost", "xgboost", "tcn"],
+            "horizon_hours": [1, 1, 1],
+            "seed": [17, 42, 17],
+            "threshold_policy": ["reference_0.5"] * 3,
+        }
+    )
+    aggregate = filter_metric_rows(frame, model="xgboost", horizon_hours=1)
+    assert aggregate["seed"].tolist() == [17, 42]
+    selected = filter_metric_rows(frame, model="xgboost", horizon_hours=1, seed=42)
+    assert selected["seed"].tolist() == [42]
+
+
+def test_event_filter_preserves_only_requested_evidence():
+    frame = pd.DataFrame(
+        {
+            "model": ["xgboost", "tcn", "tcn"],
+            "horizon_hours": [1, 1, 3],
+            "event": ["may_failure", "july_holdout", "july_holdout"],
+        }
+    )
+    selected = filter_eventwise_rows(
+        frame, model="tcn", horizon_hours=1, event="july_holdout"
+    )
+    assert len(selected) == 1
+    assert selected.iloc[0].to_dict() == {
+        "model": "tcn",
+        "horizon_hours": 1,
+        "event": "july_holdout",
+    }
+
+
+def test_empty_filter_selection_fails_clearly():
+    frame = pd.DataFrame(
+        {"model": ["xgboost"], "horizon_hours": [1], "event": ["may_failure"]}
+    )
+    with pytest.raises(ValueError, match="No event-wise evidence"):
+        filter_eventwise_rows(frame, model="tcn")
+
+
+def test_event_regime_loader_validates_required_columns(tmp_path):
+    pd.DataFrame(
+        {
+            "feature": ["TP2_mean"],
+            "may_failure": [0.2],
+            "june_failure": [0.1],
+            "july_holdout": [4.5],
+            "direction_consistency": [1.0],
+        }
+    ).to_csv(tmp_path / "event_regime_summary.csv", index=False)
+    pd.DataFrame(
+        {
+            "event": ["may_failure", "june_failure", "july_holdout"],
+            "feature": ["TP2_mean"] * 3,
+            "robust_standardized_difference": [0.2, 0.1, 4.5],
+            "event_windows": [38, 48, 33],
+        }
+    ).to_csv(tmp_path / "event_regime_effects.csv", index=False)
+    summary, effects = load_event_regime_evidence(tmp_path)
+    assert summary["feature"].tolist() == ["TP2_mean"]
+    assert set(effects["event"]) == {"may_failure", "june_failure", "july_holdout"}

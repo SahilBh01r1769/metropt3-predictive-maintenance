@@ -11,6 +11,11 @@ MODEL_LABELS = {
     "tcn": "TCN",
     "attention_tcn": "Attention-TCN",
 }
+MODEL_COLORS = {
+    "xgboost": "#A76243",
+    "tcn": "#3F7471",
+    "attention_tcn": "#526A92",
+}
 EVENT_LABELS = {
     "may_failure": "May development",
     "june_failure": "June development",
@@ -29,7 +34,86 @@ def load_explorer_evidence(
         raise ValueError("Metrics do not contain the frozen three-model comparison")
     if set(eventwise["event"].unique()) != set(EVENT_LABELS):
         raise ValueError("Event-wise evidence does not contain May, June and July")
+    if set(metrics["horizon_hours"].unique()) != {1, 3, 6, 12}:
+        raise ValueError("Metrics do not contain the frozen four-horizon comparison")
+    if set(metrics["seed"].unique()) != {17, 42, 89}:
+        raise ValueError("Metrics do not contain the frozen three-seed comparison")
     return metrics, eventwise, thresholds
+
+
+def load_event_regime_evidence(
+    evidence_root: str | Path,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load the committed descriptive event-regime evidence."""
+    root = Path(evidence_root)
+    summary = pd.read_csv(root / "event_regime_summary.csv")
+    effects = pd.read_csv(root / "event_regime_effects.csv")
+    required_summary = {
+        "feature",
+        "may_failure",
+        "june_failure",
+        "july_holdout",
+        "direction_consistency",
+    }
+    required_effects = {
+        "event",
+        "feature",
+        "robust_standardized_difference",
+        "event_windows",
+    }
+    if missing := required_summary.difference(summary.columns):
+        raise ValueError("Event-regime summary is missing: " + ", ".join(sorted(missing)))
+    if missing := required_effects.difference(effects.columns):
+        raise ValueError("Event-regime effects are missing: " + ", ".join(sorted(missing)))
+    if set(effects["event"].unique()) != set(EVENT_LABELS):
+        raise ValueError("Event-regime evidence does not contain May, June and July")
+    return summary, effects
+
+
+def filter_eventwise_rows(
+    eventwise: pd.DataFrame,
+    *,
+    model: str | None = None,
+    horizon_hours: int | None = None,
+    event: str | None = None,
+) -> pd.DataFrame:
+    """Filter committed event summaries without altering their aggregate values."""
+    selected = eventwise.copy()
+    filters = {
+        "model": model,
+        "horizon_hours": horizon_hours,
+        "event": event,
+    }
+    for column, value in filters.items():
+        if value is not None:
+            selected = selected.loc[selected[column].eq(value)]
+    if selected.empty:
+        raise ValueError("No event-wise evidence matches the selected filters")
+    return selected.copy()
+
+
+def filter_metric_rows(
+    metrics: pd.DataFrame,
+    *,
+    model: str | None = None,
+    horizon_hours: int | None = None,
+    seed: int | None = None,
+    threshold_policy: str | None = None,
+) -> pd.DataFrame:
+    """Filter saved metric rows; ``None`` means aggregate/all in the interface."""
+    selected = metrics.copy()
+    filters = {
+        "model": model,
+        "horizon_hours": horizon_hours,
+        "seed": seed,
+        "threshold_policy": threshold_policy,
+    }
+    for column, value in filters.items():
+        if value is not None:
+            selected = selected.loc[selected[column].eq(value)]
+    if selected.empty:
+        raise ValueError("No saved metrics match the selected filters")
+    return selected.copy()
 
 
 def summarize_metric_rows(
