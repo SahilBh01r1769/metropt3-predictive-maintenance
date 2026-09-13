@@ -22,6 +22,25 @@ I originally expected the sequence models to improve as the architecture became 
 
 **[Open the Streamlit results explorer](https://metropt3-predictive-maintenance.streamlit.app/)**
 
+## Explorer preview
+
+The explorer is intentionally read-only: it lets a visitor move through the frozen comparison and inspect the evidence without presenting a live maintenance product.
+
+![MetroPT experiment explorer walkthrough](assets/metropt-explorer-walkthrough.gif)
+
+<details>
+<summary>Static explorer snapshots</summary>
+
+<p align="center">
+  <img src="assets/study-overview.png" alt="MetroPT study overview" width="49%">
+  <img src="assets/event-transfer.png" alt="MetroPT event transfer comparison" width="49%">
+</p>
+<p align="center">
+  <img src="assets/model-comparison.png" alt="MetroPT model comparison" width="70%">
+</p>
+
+</details>
+
 ## Project snapshot
 
 - **1,516,948** raw telemetry rows
