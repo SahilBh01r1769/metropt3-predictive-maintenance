@@ -127,6 +127,4 @@ EXPERIMENT_PROTOCOL.md experiment setup
 
 This is a case study on one compressor dataset with very few independent failure episodes. It is useful for studying transfer between those events, but the results should not be read as expected performance on another compressor or failure type.
 
-July was untouched for the final three-model comparison. Any later analysis motivated by the July result is treated as follow-up investigation rather than another untouched test.
-
 Dataset: **MetroPT-3** public air-compressor telemetry.
